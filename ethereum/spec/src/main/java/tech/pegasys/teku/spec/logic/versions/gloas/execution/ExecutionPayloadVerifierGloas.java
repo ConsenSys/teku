@@ -64,11 +64,36 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       final BLSSignatureVerifier signatureVerifier,
       final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
       throws ExecutionPayloadVerificationException {
+    verifyExecutionPayloadEnvelope(
+        signedEnvelope, state, signatureVerifier, payloadExecutor, false);
+  }
+
+  @Override
+  public void verifyCheckpointExecutionPayloadEnvelope(
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final BeaconState state,
+      final BLSSignatureVerifier signatureVerifier,
+      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
+      throws ExecutionPayloadVerificationException {
+    verifyExecutionPayloadEnvelope(signedEnvelope, state, signatureVerifier, payloadExecutor, true);
+  }
+
+  private void verifyExecutionPayloadEnvelope(
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final BeaconState state,
+      final BLSSignatureVerifier signatureVerifier,
+      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor,
+      final boolean checkpoint)
+      throws ExecutionPayloadVerificationException {
     final ExecutionPayloadEnvelope envelope = signedEnvelope.getMessage();
     final ExecutionPayload payload = envelope.getPayload();
 
     // Verify signature
-    if (!verifyExecutionPayloadEnvelopeSignature(state, signedEnvelope, signatureVerifier)) {
+    if (!verifyExecutionPayloadEnvelopeSignature(
+        state,
+        signedEnvelope,
+        signatureVerifier,
+        checkpoint ? envelope.getSlot() : state.getSlot())) {
       throw new ExecutionPayloadVerificationException(
           "Signature verification of the execution payload envelope failed");
     }
@@ -82,7 +107,11 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       throw new ExecutionPayloadVerificationException(
           "Envelope parent beacon block root is not consistent with the latest beacon block parent root from the state");
     }
-    if (!envelope.getSlot().equals(state.getSlot())) {
+    // A trusted checkpoint can be advanced through empty slots after its latest block.
+    final UInt64 expectedSlot =
+        checkpoint ? state.getLatestBlockHeader().getSlot() : state.getSlot();
+    if (!envelope.getSlot().equals(expectedSlot)
+        || envelope.getSlot().isGreaterThan(state.getSlot())) {
       throw new ExecutionPayloadVerificationException(
           "Envelope slot is not consistent with the state slot");
     }
@@ -121,7 +150,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
     }
     if (!payload
         .getTimestamp()
-        .equals(miscHelpers.computeTimeAtSlot(state.getGenesisTime(), state.getSlot()))) {
+        .equals(miscHelpers.computeTimeAtSlot(state.getGenesisTime(), envelope.getSlot()))) {
       throw new ExecutionPayloadVerificationException(
           "Timestamp of the payload is not as expected");
     }
@@ -149,6 +178,15 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       final BeaconState state,
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final BLSSignatureVerifier signatureVerifier) {
+    return verifyExecutionPayloadEnvelopeSignature(
+        state, signedEnvelope, signatureVerifier, state.getSlot());
+  }
+
+  private boolean verifyExecutionPayloadEnvelopeSignature(
+      final BeaconState state,
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final BLSSignatureVerifier signatureVerifier,
+      final UInt64 signatureSlot) {
     final UInt64 builderIndex = signedEnvelope.getMessage().getBuilderIndex();
     final BLSPublicKey pubkey;
     if (builderIndex.equals(BUILDER_INDEX_SELF_BUILD)) {
@@ -161,7 +199,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
         beaconStateAccessors.getDomain(
             state.getForkInfo(),
             Domain.BEACON_BUILDER,
-            miscHelpers.computeEpochAtSlot(state.getSlot()));
+            miscHelpers.computeEpochAtSlot(signatureSlot));
     final Bytes signingRoot = miscHelpers.computeSigningRoot(signedEnvelope.getMessage(), domain);
     return signatureVerifier.verify(pubkey, signingRoot, signedEnvelope.getSignature());
   }

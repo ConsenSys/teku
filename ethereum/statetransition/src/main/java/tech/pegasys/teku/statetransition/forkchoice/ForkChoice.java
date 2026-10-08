@@ -276,15 +276,26 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
-    return recentChainData
-        .retrieveBlockAndState(signedEnvelope.getBeaconBlockRoot())
-        .thenCompose(
-            maybeBlockAndState ->
-                onExecutionPayloadEnvelope(
-                    signedEnvelope,
-                    maybeBlockAndState,
-                    executionLayer,
-                    receivedExecutionPayloadEventsChannelPublisher));
+    final Bytes32 blockRoot = signedEnvelope.getBeaconBlockRoot();
+    final boolean checkpoint =
+        blockRoot.equals(recentChainData.getStore().getLatestFinalized().getRoot());
+    final SafeFuture<Optional<BeaconState>> state =
+        checkpoint
+            ? recentChainData
+                .getStore()
+                .retrieveStateAndBlockSummary(blockRoot)
+                .thenApply(result -> result.map(StateAndBlockSummary::getState))
+            : recentChainData
+                .retrieveBlockAndState(blockRoot)
+                .thenApply(result -> result.map(SignedBlockAndState::getState));
+    return state.thenCompose(
+        maybeState ->
+            onExecutionPayloadEnvelope(
+                signedEnvelope,
+                maybeState,
+                checkpoint,
+                executionLayer,
+                receivedExecutionPayloadEventsChannelPublisher));
   }
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
@@ -659,29 +670,27 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   }
 
   /**
-   * Import an execution payload envelope to the store. The supplied {@code blockAndState} must
-   * contain the block and post-state after processing the block whose root is the beacon block root
-   * of the execution payload
+   * Import an execution payload envelope using its block's post-state, or the checkpoint state when
+   * recovering the finalized anchor's payload.
    */
   private SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
-      final Optional<SignedBlockAndState> blockAndState,
+      final Optional<BeaconState> maybeState,
+      final boolean checkpoint,
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
-    if (blockAndState.isEmpty()) {
+    if (maybeState.isEmpty()) {
       return SafeFuture.completedFuture(
           ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
     }
 
-    final SignedBeaconBlock block = blockAndState.get().getBlock();
-    final BeaconState state = blockAndState.get().getState();
+    final BeaconState state = maybeState.get();
 
     final ForkChoiceUtil forkChoiceUtil = spec.atSlot(signedEnvelope.getSlot()).getForkChoiceUtil();
 
     final AvailabilityChecker<?> availabilityChecker =
-        forkChoiceUtil.createAvailabilityCheckerOnExecutionPayloadEnvelope(block, signedEnvelope);
-    availabilityChecker.initiateDataAvailabilityCheck();
+        forkChoiceUtil.createAvailabilityCheckerOnExecutionPayloadEnvelope(state, signedEnvelope);
     final ForkChoicePayloadExecutorGloas payloadExecutor =
         ForkChoicePayloadExecutorGloas.create(signedEnvelope, executionLayer);
 
@@ -691,9 +700,15 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final BLSSignatureVerifier envelopeSignatureVerifier =
         spec.atSlot(signedEnvelope.getSlot()).getConfig().getBLSSignatureVerifier();
     try {
-      spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
-          .verifyExecutionPayloadEnvelope(
-              signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      if (checkpoint) {
+        spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
+            .verifyCheckpointExecutionPayloadEnvelope(
+                signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      } else {
+        spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
+            .verifyExecutionPayloadEnvelope(
+                signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      }
     } catch (final ExecutionPayloadVerificationException ex) {
       final ExecutionPayloadImportResult result =
           ExecutionPayloadImportResult.failedVerification(ex);
@@ -701,6 +716,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       return SafeFuture.completedFuture(result);
     }
 
+    availabilityChecker.initiateDataAvailabilityCheck();
     final SafeFuture<? extends DataAndValidationResult<?>> dataAndValidationResultFuture =
         availabilityChecker
             .getAndLogAvailabilityCheckResult(LOG)
