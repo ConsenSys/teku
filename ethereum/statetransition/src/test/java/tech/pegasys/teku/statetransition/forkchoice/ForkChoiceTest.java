@@ -1890,6 +1890,9 @@ class ForkChoiceTest {
 
     assertThat(forkChoice.onExecutionPayloadEnvelope(envelope, executionLayer))
         .isCompletedWithValueMatching(ExecutionPayloadImportResult::isSuccessful);
+    assertThat(recentChainData.getStore().getBlockIfAvailable(anchor.getRoot())).isEmpty();
+    assertThat(recentChainData.retrieveSignedExecutionPayloadByBlockRoot(anchor.getRoot()))
+        .isCompletedWithValue(Optional.of(envelope));
     importBlock(child);
     final ReadOnlyForkChoiceStrategy strategy =
         recentChainData.getForkChoiceStrategy().orElseThrow();

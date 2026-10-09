@@ -701,6 +701,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       return SafeFuture.completedFuture(result);
     }
 
+    // Reject invalid envelopes before starting sampling. Verification starts the asynchronous EL
+    // request without awaiting it, so DA sampling and EL validation still run concurrently.
     availabilityChecker.initiateDataAvailabilityCheck();
     final SafeFuture<? extends DataAndValidationResult<?>> dataAndValidationResultFuture =
         availabilityChecker
