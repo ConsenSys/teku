@@ -400,6 +400,8 @@ class ForkChoiceTest {
     final DataAvailabilitySampler dataAvailabilitySampler = mock(DataAvailabilitySampler.class);
     when(dataAvailabilitySampler.checkSamplingEligibility(any()))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
+    when(dataAvailabilitySampler.checkSamplingEligibility(any(), anyBoolean()))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(dataAvailabilitySampler.checkDataAvailability(any(), any()))
         .thenReturn(new SafeFuture<>());
     doReturn(true).when(spec).isAvailabilityOfDataColumnSidecarsRequiredAtSlot(any(), any());

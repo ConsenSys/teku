@@ -77,17 +77,13 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
     this.blockRoot = signedEnvelope.getBeaconBlockRoot();
     this.signedEnvelope = Optional.of(signedEnvelope);
     this.samplingEligibility =
-        () -> {
-          if (isBlockOutsideDataAvailabilityWindow()) {
-            return SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH;
-          }
-          return BeaconStateGloas.required(state)
-                  .getLatestExecutionPayloadBid()
-                  .getBlobKzgCommitments()
-                  .isEmpty()
-              ? SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS
-              : SamplingEligibilityStatus.REQUIRED;
-        };
+        () ->
+            dataAvailabilitySampler.checkSamplingEligibility(
+                slot,
+                !BeaconStateGloas.required(state)
+                    .getLatestExecutionPayloadBid()
+                    .getBlobKzgCommitments()
+                    .isEmpty());
   }
 
   @Override

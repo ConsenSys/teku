@@ -87,15 +87,9 @@ public class StubDataColumnSidecarManager implements AvailabilityCheckerFactory<
     return createAvailabilityChecker(
         signedEnvelope.getSlot(),
         Optional.of(commitments),
-        () -> {
-          if (!spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(
-              recentChainData.getStore(), signedEnvelope.getSlot())) {
-            return SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH;
-          }
-          return commitments.isEmpty()
-              ? SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS
-              : SamplingEligibilityStatus.REQUIRED;
-        });
+        () ->
+            dataAvailabilitySampler.checkSamplingEligibility(
+                signedEnvelope.getSlot(), !commitments.isEmpty()));
   }
 
   private AvailabilityChecker<UInt64> createAvailabilityChecker(
