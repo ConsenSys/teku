@@ -57,6 +57,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
     this.executionRequestsDataCodec = executionRequestsDataCodec;
   }
 
+  /** Accepts the block's post-state or a checkpoint state advanced through empty slots. */
   @Override
   public void verifyExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
@@ -64,36 +65,11 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       final BLSSignatureVerifier signatureVerifier,
       final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
       throws ExecutionPayloadVerificationException {
-    verifyExecutionPayloadEnvelope(
-        signedEnvelope, state, signatureVerifier, payloadExecutor, false);
-  }
-
-  @Override
-  public void verifyCheckpointExecutionPayloadEnvelope(
-      final SignedExecutionPayloadEnvelope signedEnvelope,
-      final BeaconState state,
-      final BLSSignatureVerifier signatureVerifier,
-      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
-      throws ExecutionPayloadVerificationException {
-    verifyExecutionPayloadEnvelope(signedEnvelope, state, signatureVerifier, payloadExecutor, true);
-  }
-
-  private void verifyExecutionPayloadEnvelope(
-      final SignedExecutionPayloadEnvelope signedEnvelope,
-      final BeaconState state,
-      final BLSSignatureVerifier signatureVerifier,
-      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor,
-      final boolean checkpoint)
-      throws ExecutionPayloadVerificationException {
     final ExecutionPayloadEnvelope envelope = signedEnvelope.getMessage();
     final ExecutionPayload payload = envelope.getPayload();
 
     // Verify signature
-    if (!verifyExecutionPayloadEnvelopeSignature(
-        state,
-        signedEnvelope,
-        signatureVerifier,
-        checkpoint ? envelope.getSlot() : state.getSlot())) {
+    if (!verifyExecutionPayloadEnvelopeSignature(state, signedEnvelope, signatureVerifier)) {
       throw new ExecutionPayloadVerificationException(
           "Signature verification of the execution payload envelope failed");
     }
@@ -108,12 +84,9 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
           "Envelope parent beacon block root is not consistent with the latest beacon block parent root from the state");
     }
     // A trusted checkpoint can be advanced through empty slots after its latest block.
-    final UInt64 expectedSlot =
-        checkpoint ? state.getLatestBlockHeader().getSlot() : state.getSlot();
-    if (!envelope.getSlot().equals(expectedSlot)
-        || envelope.getSlot().isGreaterThan(state.getSlot())) {
+    if (!envelope.getSlot().equals(state.getLatestBlockHeader().getSlot())) {
       throw new ExecutionPayloadVerificationException(
-          "Envelope slot is not consistent with the state slot");
+          "Envelope slot is not consistent with the latest beacon block slot");
     }
     final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
 
@@ -178,15 +151,6 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       final BeaconState state,
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final BLSSignatureVerifier signatureVerifier) {
-    return verifyExecutionPayloadEnvelopeSignature(
-        state, signedEnvelope, signatureVerifier, state.getSlot());
-  }
-
-  private boolean verifyExecutionPayloadEnvelopeSignature(
-      final BeaconState state,
-      final SignedExecutionPayloadEnvelope signedEnvelope,
-      final BLSSignatureVerifier signatureVerifier,
-      final UInt64 signatureSlot) {
     final UInt64 builderIndex = signedEnvelope.getMessage().getBuilderIndex();
     final BLSPublicKey pubkey;
     if (builderIndex.equals(BUILDER_INDEX_SELF_BUILD)) {
@@ -199,7 +163,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
         beaconStateAccessors.getDomain(
             state.getForkInfo(),
             Domain.BEACON_BUILDER,
-            miscHelpers.computeEpochAtSlot(signatureSlot));
+            miscHelpers.computeEpochAtSlot(signedEnvelope.getSlot()));
     final Bytes signingRoot = miscHelpers.computeSigningRoot(signedEnvelope.getMessage(), domain);
     return signatureVerifier.verify(pubkey, signingRoot, signedEnvelope.getSignature());
   }

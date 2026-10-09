@@ -293,7 +293,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
             onExecutionPayloadEnvelope(
                 signedEnvelope,
                 maybeState,
-                checkpoint,
                 executionLayer,
                 receivedExecutionPayloadEventsChannelPublisher));
   }
@@ -676,7 +675,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   private SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final Optional<BeaconState> maybeState,
-      final boolean checkpoint,
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
@@ -700,15 +698,9 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final BLSSignatureVerifier envelopeSignatureVerifier =
         spec.atSlot(signedEnvelope.getSlot()).getConfig().getBLSSignatureVerifier();
     try {
-      if (checkpoint) {
-        spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
-            .verifyCheckpointExecutionPayloadEnvelope(
-                signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
-      } else {
-        spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
-            .verifyExecutionPayloadEnvelope(
-                signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
-      }
+      spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
+          .verifyExecutionPayloadEnvelope(
+              signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
     } catch (final ExecutionPayloadVerificationException ex) {
       final ExecutionPayloadImportResult result =
           ExecutionPayloadImportResult.failedVerification(ex);

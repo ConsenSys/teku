@@ -29,15 +29,6 @@ public interface ExecutionPayloadVerifier {
       Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
       throws ExecutionPayloadVerificationException;
 
-  default void verifyCheckpointExecutionPayloadEnvelope(
-      final SignedExecutionPayloadEnvelope signedEnvelope,
-      final BeaconState state,
-      final BLSSignatureVerifier signatureVerifier,
-      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
-      throws ExecutionPayloadVerificationException {
-    verifyExecutionPayloadEnvelope(signedEnvelope, state, signatureVerifier, payloadExecutor);
-  }
-
   // verify_execution_payload_envelope_signature
   boolean verifyExecutionPayloadEnvelopeSignature(
       BeaconState state,
