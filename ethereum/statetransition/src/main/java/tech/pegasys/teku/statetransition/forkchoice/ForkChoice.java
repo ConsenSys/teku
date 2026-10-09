@@ -57,7 +57,6 @@ import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -277,17 +276,11 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
     final Bytes32 blockRoot = signedEnvelope.getBeaconBlockRoot();
-    final boolean checkpoint =
-        blockRoot.equals(recentChainData.getStore().getLatestFinalized().getRoot());
     final SafeFuture<Optional<BeaconState>> state =
-        checkpoint
-            ? recentChainData
-                .getStore()
-                .retrieveStateAndBlockSummary(blockRoot)
-                .thenApply(result -> result.map(StateAndBlockSummary::getState))
-            : recentChainData
-                .retrieveBlockAndState(blockRoot)
-                .thenApply(result -> result.map(SignedBlockAndState::getState));
+        recentChainData
+            .getStore()
+            .retrieveStateAndBlockSummary(blockRoot)
+            .thenApply(result -> result.map(StateAndBlockSummary::getState));
     return state.thenCompose(
         maybeState ->
             onExecutionPayloadEnvelope(
