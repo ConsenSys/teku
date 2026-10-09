@@ -773,7 +773,7 @@ class Store extends CacheableStore {
 
   @Override
   public SafeFuture<Optional<BeaconState>> retrieveBlockState(final Bytes32 blockRoot) {
-    return getOrRegenerateBlockAndState(blockRoot)
+    return getAndCacheBlockAndState(blockRoot)
         .thenApply(
             maybeStateAndBlockSummary ->
                 maybeStateAndBlockSummary.map(StateAndBlockSummary::getState));
@@ -783,7 +783,12 @@ class Store extends CacheableStore {
   public SafeFuture<Optional<BeaconState>> retrieveBlockState(
       final SlotAndBlockRoot slotAndBlockRoot) {
     return checkpointStates.perform(
-        new StateAtSlotTask(spec, slotAndBlockRoot, this::retrieveBlockState));
+        new StateAtSlotTask(
+            spec,
+            slotAndBlockRoot,
+            blockRoot ->
+                getOrRegenerateBlockAndState(blockRoot)
+                    .thenApply(result -> result.map(StateAndBlockSummary::getState))));
   }
 
   @Override
