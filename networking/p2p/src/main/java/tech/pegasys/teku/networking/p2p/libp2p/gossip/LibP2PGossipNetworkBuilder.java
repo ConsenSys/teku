@@ -124,7 +124,7 @@ public class LibP2PGossipNetworkBuilder {
     final SeenCache<Optional<ValidationResult>> ttlSeenCache =
         new TTLSeenCache<>(
             fastIdSeenCache, gossipParams.getSeenTTL(), builder.getCurrentTimeSupplier());
-    final SeenCache<Optional<ValidationResult>> seenCache = new LRUSeenCache<>(ttlSeenCache, 10000);
+    final SeenCache<Optional<ValidationResult>> seenCache = new LRUSeenCache<>(ttlSeenCache, 1000000);
 
     builder.setParams(gossipParams);
     builder.setScoreParams(scoreParams);
