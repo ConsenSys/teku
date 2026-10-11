@@ -2324,11 +2324,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     if (subscriptionManager == null) {
       return false;
     }
-    final UInt64 periodEndSlot =
-        spec.computeStartSlotAtEpoch(
-            spec.getSyncCommitteeUtilRequired(slot)
-                .computeFirstEpochOfNextSyncCommitteePeriod(spec.computeEpochAtSlot(slot)));
-    return subscriptionManager.hasDutyActiveAt(slot, periodEndSlot);
+    return subscriptionManager.hasDutyActiveAt(slot);
   }
 
   protected Eth2P2PNetworkBuilder createEth2P2PNetworkBuilder() {

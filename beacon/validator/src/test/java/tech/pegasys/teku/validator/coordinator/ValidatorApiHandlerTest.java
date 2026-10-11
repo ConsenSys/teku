@@ -950,7 +950,31 @@ class ValidatorApiHandlerTest {
 
     verify(syncCommitteeSubscriptionManager).subscribe(0, unsubscribeSlotSubscription2);
     verify(syncCommitteeSubscriptionManager).subscribe(1, unsubscribeSlotSubscription2);
+
+    verify(syncCommitteeSubscriptionManager).recordDuty(UInt64.ZERO, unsubscribeSlotSubscription1);
+    verify(syncCommitteeSubscriptionManager).recordDuty(UInt64.ZERO, unsubscribeSlotSubscription2);
     verifyNoMoreInteractions(syncCommitteeSubscriptionManager);
+  }
+
+  @Test
+  void subscribeToSyncCommitteeSubnets_shouldRecordDutyForPeriodEndingAtUntilEpoch() {
+    final UInt64 epochsPerPeriod =
+        UInt64.valueOf(
+            spec.getGenesisSpecConfig()
+                .toVersionAltair()
+                .orElseThrow()
+                .getEpochsPerSyncCommitteePeriod());
+    final UInt64 untilEpoch = epochsPerPeriod.times(3);
+
+    final SafeFuture<Void> result =
+        validatorApiHandler.subscribeToSyncCommitteeSubnets(
+            List.of(new SyncCommitteeSubnetSubscription(1, IntSet.of(1), untilEpoch)));
+
+    assertThat(result).isCompleted();
+    verify(syncCommitteeSubscriptionManager)
+        .recordDuty(
+            spec.computeStartSlotAtEpoch(untilEpoch.minus(epochsPerPeriod)),
+            spec.computeStartSlotAtEpoch(untilEpoch));
   }
 
   @Test

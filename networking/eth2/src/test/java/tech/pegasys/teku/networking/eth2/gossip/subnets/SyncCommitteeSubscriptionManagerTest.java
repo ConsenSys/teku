@@ -74,20 +74,36 @@ public class SyncCommitteeSubscriptionManagerTest {
   }
 
   @Test
-  void hasDutyActiveAt_shouldOnlyCountDutiesEndingWithinRange() {
-    manager.subscribe(1, UInt64.valueOf(16));
-    manager.subscribe(2, UInt64.valueOf(32));
+  void hasDutyActiveAt_shouldOnlyCountSlotsWithinDuty() {
+    manager.recordDuty(UInt64.ZERO, UInt64.valueOf(16));
+    manager.recordDuty(UInt64.valueOf(16), UInt64.valueOf(32));
 
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10), UInt64.valueOf(16))).isTrue();
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(16), UInt64.valueOf(24))).isFalse();
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(20), UInt64.valueOf(32))).isTrue();
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10))).isTrue();
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(16))).isTrue();
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(31))).isTrue();
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(32))).isFalse();
+  }
+
+  @Test
+  void hasDutyActiveAt_shouldIgnoreDutiesNotStartedYet() {
+    manager.recordDuty(UInt64.valueOf(16), UInt64.valueOf(32));
+
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10))).isFalse();
+  }
+
+  @Test
+  void hasDutyActiveAt_shouldCountDutyEndingInLaterPeriod() {
+    manager.recordDuty(UInt64.valueOf(16), UInt64.valueOf(48));
+    manager.recordDuty(UInt64.ZERO, UInt64.valueOf(48));
+
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10))).isTrue();
   }
 
   @Test
   void hasDutyActiveAt_shouldForgetEndedDuties() {
-    manager.subscribe(1, UInt64.valueOf(16));
+    manager.recordDuty(UInt64.ZERO, UInt64.valueOf(16));
     manager.onSlot(UInt64.valueOf(16));
 
-    assertThat(manager.hasDutyActiveAt(UInt64.ZERO, UInt64.valueOf(16))).isFalse();
+    assertThat(manager.hasDutyActiveAt(UInt64.ZERO)).isFalse();
   }
 }

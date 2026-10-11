@@ -16,8 +16,8 @@ package tech.pegasys.teku.networking.eth2.gossip.subnets;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
-import java.util.NavigableSet;
-import java.util.TreeSet;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
@@ -29,7 +29,7 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   private final Int2ObjectMap<UInt64> subcommitteeToUnsubscribeSlot = new Int2ObjectOpenHashMap<>();
   final Eth2P2PNetwork p2PNetwork;
 
-  private final NavigableSet<UInt64> dutyEndSlots = new TreeSet<>();
+  private final NavigableMap<UInt64, UInt64> dutyEndSlotToStartSlot = new TreeMap<>();
 
   public SyncCommitteeSubscriptionManager(final Eth2P2PNetwork p2PNetwork) {
     this.p2PNetwork = p2PNetwork;
@@ -37,7 +37,7 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
 
   @Override
   public synchronized void onSlot(final UInt64 slot) {
-    pruneDutyEndSlots(slot);
+    pruneDuties(slot);
     final ObjectIterator<Int2ObjectMap.Entry<UInt64>> iterator =
         subcommitteeToUnsubscribeSlot.int2ObjectEntrySet().iterator();
     while (iterator.hasNext()) {
@@ -51,7 +51,6 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   }
 
   public synchronized void subscribe(final int committeeSubnet, final UInt64 unsubscribeSlot) {
-    recordDutyEndSlot(unsubscribeSlot);
     final UInt64 currentUnsubscribeSlot =
         subcommitteeToUnsubscribeSlot.getOrDefault(committeeSubnet, null);
     if (currentUnsubscribeSlot == null) {
@@ -70,15 +69,16 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
     }
   }
 
-  public synchronized boolean hasDutyActiveAt(final UInt64 slot, final UInt64 latestEndSlot) {
-    return !dutyEndSlots.subSet(slot, false, latestEndSlot, true).isEmpty();
+  public synchronized void recordDuty(final UInt64 startSlot, final UInt64 endSlot) {
+    dutyEndSlotToStartSlot.merge(endSlot, startSlot, UInt64::min);
   }
 
-  protected synchronized void recordDutyEndSlot(final UInt64 unsubscribeSlot) {
-    dutyEndSlots.add(unsubscribeSlot);
+  public synchronized boolean hasDutyActiveAt(final UInt64 slot) {
+    return dutyEndSlotToStartSlot.tailMap(slot, false).values().stream()
+        .anyMatch(startSlot -> startSlot.isLessThanOrEqualTo(slot));
   }
 
-  protected synchronized void pruneDutyEndSlots(final UInt64 slot) {
-    dutyEndSlots.headSet(slot, true).clear();
+  protected synchronized void pruneDuties(final UInt64 slot) {
+    dutyEndSlotToStartSlot.headMap(slot, true).clear();
   }
 }
