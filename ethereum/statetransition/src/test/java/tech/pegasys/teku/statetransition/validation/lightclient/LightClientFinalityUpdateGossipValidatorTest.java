@@ -29,6 +29,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
@@ -109,6 +110,18 @@ public class LightClientFinalityUpdateGossipValidatorTest {
     setLocalUpdate(update);
 
     assertResult(update, IGNORE);
+  }
+
+  @TestTemplate
+  void shouldIgnoreUpdateWithPreAltairSignatureSlot() {
+    final LightClientFinalityUpdateGossipValidator phase0GenesisValidator =
+        new LightClientFinalityUpdateGossipValidator(
+            TestSpecFactory.createMinimalWithAltairForkEpoch(UInt64.ONE), recentChainData, store);
+    setLocalUpdate(finalityUpdate(5, fullParticipation()));
+
+    assertThatSafeFuture(
+            phase0GenesisValidator.validate(finalityUpdate(5, fullParticipation(), UInt64.ZERO)))
+        .isCompletedWithValueMatching(result -> result.code() == IGNORE);
   }
 
   @TestTemplate

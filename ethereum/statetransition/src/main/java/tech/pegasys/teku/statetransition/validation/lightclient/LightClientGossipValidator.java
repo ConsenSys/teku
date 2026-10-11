@@ -38,16 +38,16 @@ abstract class LightClientGossipValidator<T> {
               "%s does not advance the previously forwarded update", updateName()));
     }
 
-    if (!isSyncMessageDue(getSignatureSlot(update))) {
-      return SafeFuture.completedFuture(
-          InternalValidationResult.ignore(
-              "%s received before the sync message due time of its signature slot", updateName()));
-    }
-
     if (!getLocalUpdate().map(update::equals).orElse(false)) {
       return SafeFuture.completedFuture(
           InternalValidationResult.ignore(
               "%s does not match the locally computed update", updateName()));
+    }
+
+    if (!isSyncMessageDue(getSignatureSlot(update))) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.ignore(
+              "%s received before the sync message due time of its signature slot", updateName()));
     }
 
     latestForwarded = Optional.of(update);
