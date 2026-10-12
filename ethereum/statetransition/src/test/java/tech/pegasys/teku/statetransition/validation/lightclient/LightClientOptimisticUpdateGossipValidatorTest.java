@@ -23,6 +23,7 @@ import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -33,7 +34,6 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.storage.client.RecentChainData;
-import tech.pegasys.teku.storage.store.UpdatableStore;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class LightClientOptimisticUpdateGossipValidatorTest {
@@ -41,7 +41,7 @@ public class LightClientOptimisticUpdateGossipValidatorTest {
   private static final UInt64 SIGNATURE_SLOT = UInt64.valueOf(10);
 
   private final RecentChainData recentChainData = mock(RecentChainData.class);
-  private final UpdatableStore forkChoiceStore = mock(UpdatableStore.class);
+  private final TimeProvider timeProvider = mock(TimeProvider.class);
   private final LightClientUpdateStore store = mock(LightClientUpdateStore.class);
 
   private Spec spec;
@@ -53,10 +53,10 @@ public class LightClientOptimisticUpdateGossipValidatorTest {
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
     when(recentChainData.getGenesisTimeMillis()).thenReturn(UInt64.ZERO);
-    when(recentChainData.getStore()).thenReturn(forkChoiceStore);
     when(store.getLatestOptimisticUpdate()).thenReturn(Optional.empty());
     setTimeMillis(syncMessageDueMillis());
-    validator = new LightClientOptimisticUpdateGossipValidator(spec, recentChainData, store);
+    validator =
+        new LightClientOptimisticUpdateGossipValidator(spec, recentChainData, store, timeProvider);
   }
 
   @TestTemplate
@@ -143,6 +143,6 @@ public class LightClientOptimisticUpdateGossipValidatorTest {
   }
 
   private void setTimeMillis(final UInt64 timeMillis) {
-    when(forkChoiceStore.getTimeInMillis()).thenReturn(timeMillis);
+    when(timeProvider.getTimeInMillis()).thenReturn(timeMillis);
   }
 }

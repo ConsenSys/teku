@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.validation.lightclient;
 
 import java.util.Optional;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
@@ -25,8 +26,11 @@ public class LightClientFinalityUpdateGossipValidator
   private final LightClientUpdateStore store;
 
   public LightClientFinalityUpdateGossipValidator(
-      final Spec spec, final RecentChainData recentChainData, final LightClientUpdateStore store) {
-    super(spec, recentChainData);
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final LightClientUpdateStore store,
+      final TimeProvider timeProvider) {
+    super(spec, recentChainData, timeProvider);
     this.store = store;
   }
 

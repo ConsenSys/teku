@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.validation.lightclient;
 
 import java.util.Optional;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -23,12 +24,15 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 abstract class LightClientGossipValidator<T> {
   private final Spec spec;
   private final RecentChainData recentChainData;
+  private final TimeProvider timeProvider;
 
   private Optional<T> latestForwarded = Optional.empty();
 
-  LightClientGossipValidator(final Spec spec, final RecentChainData recentChainData) {
+  LightClientGossipValidator(
+      final Spec spec, final RecentChainData recentChainData, final TimeProvider timeProvider) {
     this.spec = spec;
     this.recentChainData = recentChainData;
+    this.timeProvider = timeProvider;
   }
 
   public synchronized SafeFuture<InternalValidationResult> validate(final T update) {
@@ -75,10 +79,12 @@ abstract class LightClientGossipValidator<T> {
   }
 
   private boolean isSyncMessageDue(final UInt64 signatureSlot) {
+    if (recentChainData.isPreGenesis()) {
+      return false;
+    }
     final UInt64 genesisTimeMillis = recentChainData.getGenesisTimeMillis();
     final UInt64 currentTimeMillis =
-        recentChainData
-            .getStore()
+        timeProvider
             .getTimeInMillis()
             .plus(spec.getNetworkingConfig().getMaximumGossipClockDisparity());
     if (signatureSlot.isGreaterThan(

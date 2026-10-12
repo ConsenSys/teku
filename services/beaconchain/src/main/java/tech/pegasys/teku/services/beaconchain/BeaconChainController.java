@@ -2246,14 +2246,14 @@ public class BeaconChainController extends Service implements BeaconChainControl
             .map(
                 __ ->
                     new LightClientFinalityUpdateGossipValidator(
-                        spec, recentChainData, lightClientUpdateStore));
+                        spec, recentChainData, lightClientUpdateStore, timeProvider));
     final Optional<LightClientOptimisticUpdateGossipValidator>
         lightClientOptimisticUpdateValidator =
             Optional.ofNullable(lightClientServerService)
                 .map(
                     __ ->
                         new LightClientOptimisticUpdateGossipValidator(
-                            spec, recentChainData, lightClientUpdateStore));
+                            spec, recentChainData, lightClientUpdateStore, timeProvider));
     lightClientFinalityUpdateValidator.ifPresent(
         validator ->
             p2pNetworkBuilder.gossipedLightClientFinalityUpdateProcessor(

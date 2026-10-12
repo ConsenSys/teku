@@ -25,6 +25,7 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -39,7 +40,6 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.storage.client.RecentChainData;
-import tech.pegasys.teku.storage.store.UpdatableStore;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class LightClientFinalityUpdateGossipValidatorTest {
@@ -47,7 +47,7 @@ public class LightClientFinalityUpdateGossipValidatorTest {
   private static final UInt64 SIGNATURE_SLOT = UInt64.valueOf(10);
 
   private final RecentChainData recentChainData = mock(RecentChainData.class);
-  private final UpdatableStore forkChoiceStore = mock(UpdatableStore.class);
+  private final TimeProvider timeProvider = mock(TimeProvider.class);
   private final LightClientUpdateStore store = mock(LightClientUpdateStore.class);
 
   private Spec spec;
@@ -59,10 +59,10 @@ public class LightClientFinalityUpdateGossipValidatorTest {
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
     when(recentChainData.getGenesisTimeMillis()).thenReturn(UInt64.ZERO);
-    when(recentChainData.getStore()).thenReturn(forkChoiceStore);
     when(store.getLatestFinalityUpdate()).thenReturn(Optional.empty());
     setTimeMillis(syncMessageDueMillis());
-    validator = new LightClientFinalityUpdateGossipValidator(spec, recentChainData, store);
+    validator =
+        new LightClientFinalityUpdateGossipValidator(spec, recentChainData, store, timeProvider);
   }
 
   @TestTemplate
@@ -104,6 +104,15 @@ public class LightClientFinalityUpdateGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnoreUpdateBeforeGenesis() {
+    final LightClientFinalityUpdate update = finalityUpdate(5, fullParticipation());
+    setLocalUpdate(update);
+    when(recentChainData.isPreGenesis()).thenReturn(true);
+
+    assertResult(update, IGNORE);
+  }
+
+  @TestTemplate
   void shouldIgnoreUpdateWithSignatureSlotFarInTheFuture() {
     final LightClientFinalityUpdate update =
         finalityUpdate(5, fullParticipation(), UInt64.MAX_VALUE);
@@ -116,7 +125,10 @@ public class LightClientFinalityUpdateGossipValidatorTest {
   void shouldIgnoreUpdateWithPreAltairSignatureSlot() {
     final LightClientFinalityUpdateGossipValidator phase0GenesisValidator =
         new LightClientFinalityUpdateGossipValidator(
-            TestSpecFactory.createMinimalWithAltairForkEpoch(UInt64.ONE), recentChainData, store);
+            TestSpecFactory.createMinimalWithAltairForkEpoch(UInt64.ONE),
+            recentChainData,
+            store,
+            timeProvider);
     setLocalUpdate(finalityUpdate(5, fullParticipation()));
 
     assertThatSafeFuture(
@@ -219,7 +231,7 @@ public class LightClientFinalityUpdateGossipValidatorTest {
   }
 
   private void setTimeMillis(final UInt64 timeMillis) {
-    when(forkChoiceStore.getTimeInMillis()).thenReturn(timeMillis);
+    when(timeProvider.getTimeInMillis()).thenReturn(timeMillis);
   }
 
   private int maximumGossipClockDisparity() {
