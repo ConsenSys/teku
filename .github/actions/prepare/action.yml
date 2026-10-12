@@ -54,6 +54,6 @@ runs:
     # that same PR, so they just consume the repository's 10GB cache quota and evict entries that are
     # actually shared (reference test fixtures, master's Gradle home).
     - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
+      uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
       with:
         cache-read-only: ${{ inputs.gradle-cache-write != 'true' || github.ref != 'refs/heads/master' }}
