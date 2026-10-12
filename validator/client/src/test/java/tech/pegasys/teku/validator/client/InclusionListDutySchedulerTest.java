@@ -16,6 +16,8 @@ package tech.pegasys.teku.validator.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.HashMap;
@@ -81,6 +83,23 @@ class InclusionListDutySchedulerTest {
     dutyScheduler.onSlot(spec.computeStartSlotAtEpoch(hezeForkEpoch));
 
     assertThat(requestedDutiesByEpoch).containsOnlyKeys(hezeForkEpoch, hezeForkEpoch.increment());
+  }
+
+  @Test
+  void shouldNotPerformDutiesForSameSlotTwice() {
+    final Spec spec = TestSpecFactory.createMinimalHeze();
+    final InclusionListDutyScheduler dutyScheduler = createDutyScheduler(spec);
+    final SlotBasedScheduledDuties<?, ?> duties = mock(SlotBasedScheduledDuties.class);
+    when(duties.performProductionDuty(any())).thenReturn(new SafeFuture<>());
+    dutyScheduler.onSlot(spec.computeStartSlotAtEpoch(UInt64.ZERO));
+    requestedDutiesByEpoch.get(UInt64.ZERO).complete(Optional.of(duties));
+    final UInt64 slot = UInt64.ONE;
+
+    // Both the head event for the slot's block and the fallback timer trigger creation
+    dutyScheduler.onInclusionListCreationDue(slot);
+    dutyScheduler.onInclusionListCreationDue(slot);
+
+    verify(duties, times(1)).performProductionDuty(slot);
   }
 
   private InclusionListDutyScheduler createDutyScheduler(final Spec spec) {
