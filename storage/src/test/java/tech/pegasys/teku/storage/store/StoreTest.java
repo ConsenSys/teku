@@ -495,8 +495,12 @@ class StoreTest extends AbstractStoreTest {
     final UInt64 childSlot = checkpointSlot.plus(1);
     assertThat(store.retrieveBlockState(new SlotAndBlockRoot(childSlot, anchor.getRoot())))
         .isCompletedWithValue(Optional.of(spec.processSlots(anchorState, childSlot)));
-    assertThatSafeFuture(
+    assertThat(
             store.retrieveBlockState(new SlotAndBlockRoot(anchorBlock.getSlot(), anchor.getRoot())))
+        .isCompletedWithValue(Optional.empty());
+    assertThatSafeFuture(
+            store.retrieveBlockState(
+                new SlotAndBlockRoot(anchorBlock.getSlot().minus(1), anchor.getRoot())))
         .isCompletedExceptionallyWith(InvalidCheckpointException.class);
     assertThat(store.retrieveBlockState(anchor.getRoot())).isCompletedWithValue(Optional.empty());
   }

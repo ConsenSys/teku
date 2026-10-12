@@ -788,7 +788,22 @@ class Store extends CacheableStore {
             slotAndBlockRoot,
             blockRoot ->
                 getOrRegenerateBlockAndState(blockRoot)
-                    .thenApply(result -> result.map(StateAndBlockSummary::getState))));
+                    .thenApply(
+                        result ->
+                            result
+                                .map(StateAndBlockSummary::getState)
+                                .filter(
+                                    state -> {
+                                      final UInt64 requestedSlot = slotAndBlockRoot.getSlot();
+                                      // An advanced checkpoint cannot supply an earlier state.
+                                      // Requests before the block's own slot must still fail task
+                                      // validation.
+                                      return !state.getSlot().isGreaterThan(requestedSlot)
+                                          || state
+                                              .getLatestBlockHeader()
+                                              .getSlot()
+                                              .isGreaterThan(requestedSlot);
+                                    }))));
   }
 
   @Override
