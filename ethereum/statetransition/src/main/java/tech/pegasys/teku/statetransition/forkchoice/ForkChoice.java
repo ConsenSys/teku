@@ -278,7 +278,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final Bytes32 blockRoot = signedEnvelope.getBeaconBlockRoot();
     final SafeFuture<Optional<BeaconState>> state =
         recentChainData
-            .getStore()
             .retrieveStateAndBlockSummary(blockRoot)
             .thenApply(result -> result.map(StateAndBlockSummary::getState));
     return state.thenCompose(

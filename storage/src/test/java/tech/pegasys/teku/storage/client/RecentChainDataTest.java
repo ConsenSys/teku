@@ -893,6 +893,38 @@ class RecentChainDataTest {
   }
 
   @Test
+  void retrieveStateAndBlockSummary_beforeStoreInitialization() {
+    initPreGenesis();
+
+    assertThat(recentChainData.retrieveStateAndBlockSummary(dataStructureUtil.randomBytes32()))
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  void retrieveStateAndBlockSummary_withStateOnlyAnchor() throws Exception {
+    initPreGenesis();
+    chainBuilder.generateGenesis();
+    final UInt64 checkpointSlot = spec.computeStartSlotAtEpoch(UInt64.ONE);
+    final SignedBlockAndState block = chainBuilder.generateBlockAtSlot(checkpointSlot.minus(1));
+    final BeaconState state = spec.processSlots(block.getState(), checkpointSlot);
+    final AnchorPoint anchor = AnchorPoint.fromInitialState(spec, state);
+    recentChainData.initializeFromAnchorPoint(anchor, UInt64.ZERO);
+
+    assertThat(recentChainData.retrieveStateAndBlockSummary(anchor.getRoot()))
+        .isCompletedWithValueMatching(
+            result ->
+                result
+                    .filter(
+                        summary ->
+                            summary.getState().equals(state)
+                                && summary.getRoot().equals(anchor.getRoot())
+                                && summary.getSignedBeaconBlock().isEmpty())
+                    .isPresent());
+    assertThat(recentChainData.retrieveBlockState(anchor.getRoot()))
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
   public void retrieveBlockAndState_withBlockAndStateAvailable() {
     initPostGenesis();
     final SignedBlockAndState block = advanceChain(recentChainData);

@@ -1836,6 +1836,16 @@ class ForkChoiceTest {
         .isGreaterThan(ZERO);
   }
 
+  @Test
+  void onExecutionPayloadEnvelope_shouldReturnUnknownRootBeforeStoreInitialization() {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), false);
+    final SignedExecutionPayloadEnvelope envelope =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+
+    assertThat(forkChoice.onExecutionPayloadEnvelope(envelope, executionLayer))
+        .isCompletedWithValue(ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
+  }
+
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
   void onBlock_shouldRecoverFullParentFromStateOnlyCheckpoint(final boolean skippedSlot)

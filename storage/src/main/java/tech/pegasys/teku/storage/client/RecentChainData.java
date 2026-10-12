@@ -794,6 +794,19 @@ public abstract class RecentChainData
     return store.retrieveBlockAndState(blockRoot);
   }
 
+  /**
+   * Retrieves a state and block summary, or empty if the store is not initialized or the root is
+   * unavailable. A state-only checkpoint may have no signed block and its state may be advanced
+   * beyond the block's slot.
+   */
+  public SafeFuture<Optional<StateAndBlockSummary>> retrieveStateAndBlockSummary(
+      final Bytes32 blockRoot) {
+    if (store == null) {
+      return EmptyStoreResults.EMPTY_STATE_AND_BLOCK_SUMMARY_FUTURE;
+    }
+    return store.retrieveStateAndBlockSummary(blockRoot);
+  }
+
   public Optional<SignedBeaconBlock> getRecentlyValidatedSignedBlockByRoot(final Bytes32 root) {
     return validatedBlockProvider.getBlock(root);
   }
