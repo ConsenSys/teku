@@ -51,6 +51,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
 public class SszTestExecutor<T extends SszData> implements TestExecutor {
 
@@ -323,6 +324,16 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
                   schemas ->
                       SchemaDefinitionsGloas.required(schemas)
                           .getSignedExecutionPayloadBidSchema()))
+          // Heze
+          .put(
+              "ssz_static/InclusionList",
+              new SszTestExecutor<>(
+                  schemas -> SchemaDefinitionsHeze.required(schemas).getInclusionListSchema()))
+          .put(
+              "ssz_static/SignedInclusionList",
+              new SszTestExecutor<>(
+                  schemas ->
+                      SchemaDefinitionsHeze.required(schemas).getSignedInclusionListSchema()))
           .put(
               "ssz_static/ExecutionPayloadEnvelope",
               new SszTestExecutor<>(

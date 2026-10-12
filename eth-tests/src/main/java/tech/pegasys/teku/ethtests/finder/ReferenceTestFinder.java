@@ -35,7 +35,8 @@ public class ReferenceTestFinder {
           TestFork.DENEB,
           TestFork.ELECTRA,
           TestFork.FULU,
-          TestFork.GLOAS);
+          TestFork.GLOAS,
+          TestFork.HEZE);
 
   /** Finds every reference test in the location configured by system properties. */
   @MustBeClosed
@@ -95,7 +96,10 @@ public class ReferenceTestFinder {
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
                               "gloas - minimal - fork_choice/reorg - simple_attempted_reorg_without_enough_ffg_votes",
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
-                              "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch")),
+                              "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch",
+                              "heze - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
+                              "heze - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
+                              "heze - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch")),
                       new MerkleProofTestFinder())
                   .flatMap(unchecked(finder -> finder.findTests(fork, spec, testsPath)));
             });

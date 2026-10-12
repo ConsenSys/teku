@@ -136,6 +136,7 @@ public abstract class Eth2ReferenceTestCase {
           case TestFork.ELECTRA -> ELECTRA_TEST_TYPES.get(testDefinition.getTestType());
           case TestFork.FULU -> FULU_TEST_TYPES.get(testDefinition.getTestType());
           case TestFork.GLOAS -> GLOAS_TEST_TYPES.get(testDefinition.getTestType());
+          case TestFork.HEZE -> GLOAS_TEST_TYPES.get(testDefinition.getTestType());
           default -> null;
         };
 
