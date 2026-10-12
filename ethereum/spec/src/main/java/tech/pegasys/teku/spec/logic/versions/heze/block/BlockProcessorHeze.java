@@ -32,6 +32,7 @@ import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
+import tech.pegasys.teku.spec.datastructures.util.Eip8015RemovedFields;
 import tech.pegasys.teku.spec.logic.common.operations.OperationSignatureVerifier;
 import tech.pegasys.teku.spec.logic.common.operations.validation.OperationValidator;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProcessingException;
@@ -96,6 +97,12 @@ public class BlockProcessorHeze extends BlockProcessorGloas {
   @Override
   protected void verifyOutstandingDepositsAreProcessed(
       final BeaconState state, final BeaconBlockBody body) {}
+
+  /** The Heze block body has no {@code deposits} to apply (EIP-8015). */
+  @Override
+  protected SszList<Deposit> getDepositsForBlsChangeRetry(final BeaconBlockBody body) {
+    return Eip8015RemovedFields.EMPTY_DEPOSITS;
+  }
 
   /** The Heze block body has no {@code deposits} (EIP-8015). */
   @Override

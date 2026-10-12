@@ -119,7 +119,6 @@ public class BlockProcessorCapella extends BlockProcessorBellatrix {
       final SignedBeaconBlock block,
       final BLSSignatureVerifier signatureVerifier)
       throws BlockProcessingException {
-    final SszList<Deposit> deposits = block.getMessage().getBody().getDeposits();
     BeaconState validationState = preState;
     final SszList<SignedBlsToExecutionChange> signedBlsToExecutionChanges =
         block
@@ -135,18 +134,26 @@ public class BlockProcessorCapella extends BlockProcessorBellatrix {
         verifyBlsToExecutionChangesPreProcessing(
             validationState, signedBlsToExecutionChanges, signatureVerifier);
 
-    if (!blockValidationResult.isValid() && !deposits.isEmpty()) {
+    if (!blockValidationResult.isValid()) {
       // It's possible that a bls change referred to a validator which is in the
       // pending deposits list, so apply deposits and attempt validation again.
-      final MutableBeaconStateCapella mutableBeaconStateCapella =
-          BeaconStateCapella.required(preState).createWritableCopy();
-      processDeposits(mutableBeaconStateCapella, block.getMessage().getBody().getDeposits());
-      validationState = mutableBeaconStateCapella.commitChanges();
-      blockValidationResult =
-          verifyBlsToExecutionChangesPreProcessing(
-              validationState, signedBlsToExecutionChanges, signatureVerifier);
+      final SszList<Deposit> deposits = getDepositsForBlsChangeRetry(block.getMessage().getBody());
+      if (!deposits.isEmpty()) {
+        final MutableBeaconStateCapella mutableBeaconStateCapella =
+            BeaconStateCapella.required(preState).createWritableCopy();
+        processDeposits(mutableBeaconStateCapella, deposits);
+        validationState = mutableBeaconStateCapella.commitChanges();
+        blockValidationResult =
+            verifyBlsToExecutionChangesPreProcessing(
+                validationState, signedBlsToExecutionChanges, signatureVerifier);
+      }
     }
     return blockValidationResult;
+  }
+
+  /** The block's deposits to apply before retrying its BLS to execution change validation. */
+  protected SszList<Deposit> getDepositsForBlsChangeRetry(final BeaconBlockBody body) {
+    return body.getDeposits();
   }
 
   @Override

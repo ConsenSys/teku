@@ -88,12 +88,23 @@ class BeaconStateHezeTest {
                     (MutableBeaconStateHeze) mutableState;
                 mutableStateHeze.setEth1Data(dataStructureUtil.randomEth1Data());
                 mutableStateHeze.getEth1DataVotes().append(dataStructureUtil.randomEth1Data());
+                mutableStateHeze.setEth1DataVotes(Eip8015RemovedFields.EMPTY_ETH1_DATA_VOTES);
                 mutableStateHeze.setEth1DepositIndex(UInt64.valueOf(5));
                 mutableStateHeze.setDepositRequestsStartIndex(UInt64.valueOf(5));
               });
 
       assertThat(updatedState.hashTreeRoot()).isEqualTo(state.hashTreeRoot());
-      assertThat(logCaptor.getErrorLogs()).hasSize(4);
+      assertThat(logCaptor.getErrorLogs()).hasSize(5);
+    }
+  }
+
+  @Test
+  void eth1DataVotesSchema_shouldReturnEmptyListSchemaAndLogError() {
+    try (final LogCaptor logCaptor = LogCaptor.forClass(Eip8015RemovedFields.class)) {
+      assertThat(schema.getEth1DataVotesSchema())
+          .isEqualTo(Eip8015RemovedFields.EMPTY_ETH1_DATA_VOTES.getSchema());
+      assertThat(logCaptor.getErrorLogs())
+          .containsExactly("Accessed eth1_data_votes, which was removed in Heze (EIP-8015)");
     }
   }
 

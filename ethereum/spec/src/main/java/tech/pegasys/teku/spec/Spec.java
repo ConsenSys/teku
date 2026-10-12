@@ -1286,15 +1286,6 @@ public class Spec {
     return atState(state).getValidatorsUtil().getValidatorIndex(state, publicKey);
   }
 
-  public Optional<Bytes32> getInclusionListCommitteeRoot(
-      final BeaconState state, final UInt64 slot) {
-    return Optional.of(
-        atSlot(slot)
-            .getInclusionListUtil()
-            .orElseThrow()
-            .getInclusionListCommitteeRoot(state, slot));
-  }
-
   public Bytes32 getInclusionListDependentRoot(
       final BeaconState state, final UInt64 inclusionListSlot) {
     return computeEpochAtSlot(inclusionListSlot).isGreaterThan(getCurrentEpoch(state))
@@ -1305,14 +1296,6 @@ public class Spec {
   public Optional<CommitteeAssignment> getCommitteeAssignment(
       final BeaconState state, final UInt64 epoch, final int validatorIndex) {
     return atEpoch(epoch).getValidatorsUtil().getCommitteeAssignment(state, epoch, validatorIndex);
-  }
-
-  public Optional<UInt64> getInclusionCommitteeAssignment(
-      final BeaconState state, final UInt64 epoch, final int validatorIndex) {
-    return atEpoch(epoch)
-        .getInclusionListUtil()
-        .orElseThrow()
-        .getInclusionListCommitteeAssignment(state, epoch, validatorIndex);
   }
 
   public Int2ObjectMap<CommitteeAssignment> getValidatorIndexToCommitteeAssignmentMap(

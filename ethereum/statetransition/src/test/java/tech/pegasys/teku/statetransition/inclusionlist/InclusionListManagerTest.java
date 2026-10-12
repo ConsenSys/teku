@@ -165,6 +165,31 @@ class InclusionListManagerTest {
   }
 
   @Test
+  void onSlot_shouldPruneInclusionListsOutsideTheRetentionWindow() {
+    final UInt64 slot = UInt64.ONE;
+    final SignedBlockAndState genesis = initializeFromGenesis();
+    final IntList committee = inclusionListCommittee(slot, genesis.getRoot());
+    final SignedInclusionList inclusionList =
+        createSignedInclusionList(slot, UInt64.valueOf(committee.getInt(0)), genesis.getRoot());
+    inclusionListManager.add(inclusionList);
+
+    // The last slot that still retains the list
+    inclusionListManager.onSlot(slot.plus(InclusionListManager.SLOTS_TO_RETAIN));
+    assertThat(
+            safeJoin(
+                inclusionListManager.getInclusionLists(
+                    slot, genesis.getRoot(), requestedPositions(slot, 0))))
+        .containsExactly(inclusionList);
+
+    inclusionListManager.onSlot(slot.plus(InclusionListManager.SLOTS_TO_RETAIN).increment());
+    assertThat(
+            safeJoin(
+                inclusionListManager.getInclusionLists(
+                    slot, genesis.getRoot(), requestedPositions(slot, 0))))
+        .isEmpty();
+  }
+
+  @Test
   void getInclusionLists_shouldNotReturnListsFromEquivocatingValidator() {
     final UInt64 slot = UInt64.ONE;
     final SignedBlockAndState genesis = initializeFromGenesis();

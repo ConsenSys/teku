@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.logic.versions.heze.block;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -22,19 +23,50 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
+import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.cache.IndexedAttestationCache;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.execution.NewPayloadRequest;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.util.Eip8015RemovedFields;
+import tech.pegasys.teku.spec.logic.common.block.BlockProcessor;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 class BlockProcessorHezeTest {
   private final Spec spec = TestSpecFactory.createMinimalHeze();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+
+  @Test
+  void processAndValidateBlock_shouldNotReadRemovedDeposits() {
+    final BeaconState state = dataStructureUtil.randomBeaconState();
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
+    final BlockProcessor blockProcessor = spec.getGenesisSpec().getBlockProcessor();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(Eip8015RemovedFields.class)) {
+      // The random BLS to execution changes fail pre-processing validation, after the retry that
+      // would apply the block's deposits
+      assertThatThrownBy(
+              () ->
+                  blockProcessor.processAndValidateBlock(
+                      block,
+                      state,
+                      IndexedAttestationCache.NOOP,
+                      BLSSignatureVerifier.NOOP,
+                      Optional.empty(),
+                      Optional.empty()))
+          .isInstanceOf(StateTransitionException.class);
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
+  }
 
   @Test
   void computeNewPayloadRequest_shouldDeduplicateTransactionsWithinAndAcrossLists()

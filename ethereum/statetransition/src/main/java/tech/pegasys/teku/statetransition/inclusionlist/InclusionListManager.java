@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition.inclusionlist;
 
+import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -51,7 +52,8 @@ public class InclusionListManager implements SlotEventsChannel {
 
   private static final Logger LOG = LogManager.getLogger();
 
-  private static final UInt64 SLOTS_TO_RETAIN = UInt64.valueOf(4);
+  @VisibleForTesting static final UInt64 SLOTS_TO_RETAIN = UInt64.valueOf(4);
+
   private final SignedInclusionListValidator signedInclusionListValidator;
   private final ForkChoice forkChoice;
   private final Spec spec;

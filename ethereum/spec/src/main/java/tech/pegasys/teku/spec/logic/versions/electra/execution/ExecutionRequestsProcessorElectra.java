@@ -93,7 +93,11 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
     final PendingDeposit.PendingDepositSchema pendingDepositSchema =
         schemaDefinitions.getPendingDepositSchema();
     for (DepositRequest depositRequest : depositRequests) {
-      updateDepositRequestsStartIndex(stateElectra, depositRequest);
+      if (stateElectra
+          .getDepositRequestsStartIndex()
+          .equals(SpecConfigElectra.UNSET_DEPOSIT_REQUESTS_START_INDEX)) {
+        stateElectra.setDepositRequestsStartIndex(depositRequest.getIndex());
+      }
       pendingDeposits.append(
           pendingDepositSchema.create(
               new SszPublicKey(depositRequest.getPubkey()),
@@ -101,15 +105,6 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
               SszUInt64.of(depositRequest.getAmount()),
               new SszSignature(depositRequest.getSignature()),
               SszUInt64.of(state.getSlot())));
-    }
-  }
-
-  protected void updateDepositRequestsStartIndex(
-      final MutableBeaconStateElectra state, final DepositRequest depositRequest) {
-    if (state
-        .getDepositRequestsStartIndex()
-        .equals(SpecConfigElectra.UNSET_DEPOSIT_REQUESTS_START_INDEX)) {
-      state.setDepositRequestsStartIndex(depositRequest.getIndex());
     }
   }
 

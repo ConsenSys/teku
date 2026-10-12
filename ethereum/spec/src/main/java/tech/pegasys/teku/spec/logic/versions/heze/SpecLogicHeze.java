@@ -47,17 +47,16 @@ import tech.pegasys.teku.spec.logic.versions.gloas.operations.validation.Attesta
 import tech.pegasys.teku.spec.logic.versions.gloas.util.AttestationUtilGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.util.DataColumnSidecarUtilGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.util.ProposerPreferencesUtilGloas;
+import tech.pegasys.teku.spec.logic.versions.gloas.util.ValidatorsUtilGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.weaksubjectivity.WeakSubjectivityCalculatorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.withdrawals.WithdrawalsHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.heze.block.BlockProcessorHeze;
-import tech.pegasys.teku.spec.logic.versions.heze.execution.ExecutionRequestsProcessorHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.forktransition.HezeStateUpgrade;
 import tech.pegasys.teku.spec.logic.versions.heze.helpers.BeaconStateAccessorsHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.helpers.MiscHelpersHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.statetransition.epoch.EpochProcessorHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.util.ForkChoiceUtilHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.util.InclusionListUtil;
-import tech.pegasys.teku.spec.logic.versions.heze.util.ValidatorsUtilHeze;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
 public class SpecLogicHeze extends AbstractSpecLogic {
@@ -151,8 +150,8 @@ public class SpecLogicHeze extends AbstractSpecLogic {
         new WeakSubjectivityCalculatorGloas(config, beaconStateAccessors, miscHelpers);
 
     // Util
-    final ValidatorsUtilHeze validatorsUtil =
-        new ValidatorsUtilHeze(config, miscHelpers, beaconStateAccessors);
+    final ValidatorsUtilGloas validatorsUtil =
+        new ValidatorsUtilGloas(config, miscHelpers, beaconStateAccessors);
     final BeaconStateUtil beaconStateUtil =
         new BeaconStateUtil(config, predicates, miscHelpers, beaconStateAccessors);
     final AttestationUtilGloas attestationUtil =
@@ -199,7 +198,7 @@ public class SpecLogicHeze extends AbstractSpecLogic {
         new WithdrawalsHelpersGloas(
             schemaDefinitions, miscHelpers, config, predicates, beaconStateMutators);
     final ExecutionRequestsProcessorGloas executionRequestsProcessor =
-        new ExecutionRequestsProcessorHeze(
+        new ExecutionRequestsProcessorGloas(
             schemaDefinitions,
             miscHelpers,
             config,
