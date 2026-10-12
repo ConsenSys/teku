@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
@@ -2241,27 +2242,31 @@ public class BeaconChainController extends Service implements BeaconChainControl
             .recordMessageArrival(true)
             .p2pDebugDataDumper(debugDataDumper);
 
-    final Optional<LightClientFinalityUpdateGossipValidator> lightClientFinalityUpdateValidator =
-        Optional.ofNullable(lightClientServerService)
-            .map(
-                __ ->
-                    new LightClientFinalityUpdateGossipValidator(
-                        spec, recentChainData, lightClientUpdateStore, timeProvider));
-    final Optional<LightClientOptimisticUpdateGossipValidator>
-        lightClientOptimisticUpdateValidator =
-            Optional.ofNullable(lightClientServerService)
-                .map(
-                    __ ->
-                        new LightClientOptimisticUpdateGossipValidator(
-                            spec, recentChainData, lightClientUpdateStore, timeProvider));
-    lightClientFinalityUpdateValidator.ifPresent(
-        validator ->
-            p2pNetworkBuilder.gossipedLightClientFinalityUpdateProcessor(
-                (update, arrivalTimestamp) -> validator.validate(update)));
-    lightClientOptimisticUpdateValidator.ifPresent(
-        validator ->
-            p2pNetworkBuilder.gossipedLightClientOptimisticUpdateProcessor(
-                (update, arrivalTimestamp) -> validator.validate(update)));
+    if (lightClientServerService != null) {
+      final LightClientFinalityUpdateGossipValidator finalityValidator =
+          new LightClientFinalityUpdateGossipValidator(
+              spec, recentChainData, lightClientUpdateStore, timeProvider);
+      final LightClientOptimisticUpdateGossipValidator optimisticValidator =
+          new LightClientOptimisticUpdateGossipValidator(
+              spec, recentChainData, lightClientUpdateStore, timeProvider);
+      p2pNetworkBuilder
+          .gossipedLightClientFinalityUpdateProcessor(
+              (update, arrivalTimestamp) -> finalityValidator.validate(update))
+          .gossipedLightClientOptimisticUpdateProcessor(
+              (update, arrivalTimestamp) -> optimisticValidator.validate(update));
+      lightClientServerService.subscribeToFinalityUpdatesToPublish(
+          update ->
+              publishLightClientUpdate(
+                  update.getSignatureSlot().get(),
+                  () -> finalityValidator.markForwarded(update),
+                  () -> p2pNetwork.publishLightClientFinalityUpdate(update)));
+      lightClientServerService.subscribeToOptimisticUpdatesToPublish(
+          update ->
+              publishLightClientUpdate(
+                  update.getSignatureSlot().get(),
+                  () -> optimisticValidator.markForwarded(update),
+                  () -> p2pNetwork.publishLightClientOptimisticUpdate(update)));
+    }
 
     this.p2pNetwork = p2pNetworkBuilder.build();
 
@@ -2283,37 +2288,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishProposerPreferences));
     executionPayloadBidManager.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishExecutionPayloadBid));
-    lightClientFinalityUpdateValidator.ifPresent(
-        validator ->
-            lightClientServerService.subscribeToFinalityUpdatesToPublish(
-                update ->
-                    hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
-                        .thenAccept(
-                            hasDuty -> {
-                              if (hasDuty && validator.markForwarded(update)) {
-                                p2pNetwork.publishLightClientFinalityUpdate(update);
-                              }
-                            })
-                        .finish(
-                            error ->
-                                LOG.error(
-                                    "Failed to publish light client finality update", error))));
-    lightClientOptimisticUpdateValidator.ifPresent(
-        validator ->
-            lightClientServerService.subscribeToOptimisticUpdatesToPublish(
-                update ->
-                    hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
-                        .thenAccept(
-                            hasDuty -> {
-                              if (hasDuty && validator.markForwarded(update)) {
-                                p2pNetwork.publishLightClientOptimisticUpdate(update);
-                              }
-                            })
-                        .finish(
-                            error ->
-                                LOG.error(
-                                    "Failed to publish light client optimistic update", error))));
-
     eventChannels.subscribe(
         CustodyGroupCountChannel.class,
         CustodyGroupCountChannel.createCustodyGroupCountSubscriber(
@@ -2330,6 +2304,18 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 () ->
                     new InvalidConfigurationException(
                         "Failed to get NodeId from Discovery System"));
+  }
+
+  private void publishLightClientUpdate(
+      final UInt64 signatureSlot, final BooleanSupplier markForwarded, final Runnable publish) {
+    hasLocalSyncCommitteeDutyAt(signatureSlot)
+        .thenAccept(
+            hasDuty -> {
+              if (hasDuty && markForwarded.getAsBoolean()) {
+                publish.run();
+              }
+            })
+        .finish(error -> LOG.error("Failed to publish light client update", error));
   }
 
   private SafeFuture<Boolean> hasLocalSyncCommitteeDutyAt(final UInt64 slot) {
