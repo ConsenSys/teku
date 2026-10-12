@@ -175,20 +175,23 @@ jobs:
           name: teku-docker-image
           path: ${{ runner.temp }}
 
+      # Pull docker.io images through the GCR mirror instead of logging in to Docker Hub: no
+      # rate limits, no credential, and forked PRs (which cannot see secrets) keep working. The
+      # daemon falls back to docker.io when the mirror misses.
+      - name: Pull Docker Hub images through the GCR mirror
+        if: ${{ inputs.stage_key == 'acceptance' }}
+        shell: bash
+        run: |
+          { [ -f /etc/docker/daemon.json ] && cat /etc/docker/daemon.json || echo '{}'; } \
+            | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' > "$RUNNER_TEMP/daemon.json"
+          sudo cp "$RUNNER_TEMP/daemon.json" /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - name: Load Teku docker image
         if: ${{ inputs.stage_key == 'acceptance' }}
         shell: bash
         run: |
           zstd -dc "${{ runner.temp }}/teku-docker-image.tar.zst" | docker load && rm "${{ runner.temp }}/teku-docker-image.tar.zst" && docker images consensys/teku
-
-      - name: Login to dockerhub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        if: ${{ inputs.stage_key == 'acceptance' }}
-        with:
-          # Don't panic, throw away account to avoid Docker rate limits when downloading.
-          # Second reason we're doing this is so that forked PRs from external contributors works ie env vars aren't visible to forked PRs from within contexts
-          username: "cddockeruser"
-          password: "fa8651f2-88be-48b7-98ce-e711bd376252"
 
       - name: Compute shard ${{ matrix.shard }} of ${{ inputs.shard_count }} for ${{ inputs.stage_name }}
         id: shard

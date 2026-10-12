@@ -782,7 +782,6 @@ jobs:
       assemble_run_id: ${{ github.run_id }}
       jdk_version: jdk25
       include_hash_in_docker: ${{ github.event_name == 'workflow_dispatch' && inputs.include_hash_in_docker || 'false' }}
-    secrets: inherit
 
   publishDockerJDK26:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
@@ -796,7 +795,6 @@ jobs:
       assemble_run_id: ${{ github.run_id }}
       jdk_version: jdk26
       include_hash_in_docker: ${{ github.event_name == 'workflow_dispatch' && inputs.include_hash_in_docker || 'false' }}
-    secrets: inherit
 
   # Release Distribution
   publishRelease:
