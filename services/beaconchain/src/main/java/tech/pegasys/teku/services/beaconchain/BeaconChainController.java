@@ -2036,12 +2036,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
             validatorApiHandler,
             beaconConfig.beaconRestApiConfig().getValidatorThreads());
 
-    // if subscribeAllSubnets is set, the slot events in these handlers are empty,
-    // so don't subscribe.
+    eventChannels.subscribe(SlotEventsChannel.class, syncCommitteeSubscriptionManager);
+
     if (!beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()) {
-      eventChannels
-          .subscribe(SlotEventsChannel.class, attestationTopicSubscriber)
-          .subscribe(SlotEventsChannel.class, syncCommitteeSubscriptionManager);
+      eventChannels.subscribe(SlotEventsChannel.class, attestationTopicSubscriber);
     }
   }
 
