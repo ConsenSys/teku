@@ -10,11 +10,6 @@
     "state_root": "0x9afe264636bc3ec468f387702d863193269cc35cfc84e67a14dbf5c4b3aa0e0e",
     "body": {
       "randao_reveal": "0x896972a61590fa3df074e8b86d9229c800e16b2c69c92b424c42947efb2c5c9badf3dea0289f088c86cf45ef8add162d1764bfe82b05fa69da6969f8a5ef4a5d70422b2d6568164b0f34de00e4592a05ab90c757c76b2edfc512fef7937c5a5a",
-      "eth1_data": {
-        "deposit_root": "0x367cbd40ac7318427aadb97345a91fa2e965daf3158d7f1846f1306305f41bef",
-        "deposit_count": "4669978815449698508",
-        "block_hash": "0x103ac9406cdc59b89027eb1c9e97f607dd5fdccfa8fb2da4eaeea9d25032add9"
-      },
       "graffiti": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "proposer_slashings": [
         {
@@ -142,7 +137,6 @@
           "committee_bits": "0x06"
         }
       ],
-      "deposits": [],
       "voluntary_exits": [
         {
           "message": {
