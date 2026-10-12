@@ -32,6 +32,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
@@ -47,6 +48,7 @@ public class LightClientUpdateStoreTest {
   /** Blocks are on the canonical chain unless a test says otherwise. */
   private static final BiPredicate<UInt64, Bytes32> CANONICAL = (slot, root) -> true;
 
+  private SpecContext specContext;
   private Spec spec;
   private DataStructureUtil dataStructureUtil;
   private final LightClientUpdateChannel channel = mock(LightClientUpdateChannel.class);
@@ -54,6 +56,7 @@ public class LightClientUpdateStoreTest {
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
+    this.specContext = specContext;
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
     when(channel.onNewBestLightClientUpdate(any(), any(), any())).thenReturn(SafeFuture.COMPLETE);
@@ -246,6 +249,26 @@ public class LightClientUpdateStoreTest {
         .isEqualTo(finalizedInAttestedPeriod);
     assertThat(getBestUpdateAfterAdding(finalizedInEarlierPeriod, finalizedInAttestedPeriod))
         .isEqualTo(finalizedInAttestedPeriod);
+  }
+
+  @TestTemplate
+  public void addUpdate_shouldCompareUpdatesWithPreAltairFinalizedHeader() {
+    specContext.assumeIsOneOf(SpecMilestone.ALTAIR);
+    spec = TestSpecFactory.createMinimalWithAltairForkEpoch(UInt64.ONE);
+    dataStructureUtil = new DataStructureUtil(spec);
+    final LightClientUpdate moreParticipants =
+        createLightClientUpdate()
+            .finalizedSlot(UInt64.ZERO)
+            .syncCommitteeParticipants(supermajorityParticipants() + 1)
+            .build();
+    final LightClientUpdate fewerParticipants =
+        createLightClientUpdate()
+            .finalizedSlot(UInt64.ZERO)
+            .syncCommitteeParticipants(supermajorityParticipants())
+            .build();
+
+    assertThat(getBestUpdateAfterAdding(fewerParticipants, moreParticipants))
+        .isEqualTo(moreParticipants);
   }
 
   @TestTemplate
@@ -589,12 +612,14 @@ public class LightClientUpdateStoreTest {
 
   private UInt64 periodOneStartSlot() {
     return spec.computeStartSlotAtEpoch(
-        spec.getSyncCommitteeUtilRequired(UInt64.ZERO)
-            .computeFirstEpochOfNextSyncCommitteePeriod(UInt64.ZERO));
+        UInt64.valueOf(altairConfig().getEpochsPerSyncCommitteePeriod()));
   }
 
   private int supermajorityParticipants() {
-    return (SpecConfigAltair.required(spec.getGenesisSpecConfig()).getSyncCommitteeSize() * 2 + 2)
-        / 3;
+    return (altairConfig().getSyncCommitteeSize() * 2 + 2) / 3;
+  }
+
+  private SpecConfigAltair altairConfig() {
+    return SpecConfigAltair.required(spec.forMilestone(SpecMilestone.ALTAIR).getConfig());
   }
 }

@@ -29,6 +29,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
@@ -314,8 +315,11 @@ public class LightClientUpdateStore {
     return newSignatureSlot.isGreaterThan(oldSignatureSlot);
   }
 
+  /** Finalized headers may predate Altair, so the period must not depend on the fork at slot. */
   private UInt64 syncCommitteePeriodAtSlot(final UInt64 slot) {
-    return spec.getSyncCommitteeUtilRequired(slot)
+    return spec.forMilestone(SpecMilestone.ALTAIR)
+        .getSyncCommitteeUtil()
+        .orElseThrow()
         .computeSyncCommitteePeriod(spec.computeEpochAtSlot(slot));
   }
 }

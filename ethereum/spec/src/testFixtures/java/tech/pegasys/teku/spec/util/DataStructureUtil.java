@@ -3080,7 +3080,9 @@ public final class DataStructureUtil {
           lightClientHeaderAtSlot(attestedSlot),
           randomSyncCommittee(),
           branch(schema.getSyncCommitteeBranchSchema(), syncCommitteeBranch),
-          lightClientHeaderAtSlot(finalizedSlot),
+          getAltairSchemaDefinitions(attestedSlot)
+              .getLightClientHeaderSchema()
+              .create(randomBeaconBlockHeader(finalizedSlot, UInt64.ZERO)),
           branch(schema.getFinalityBranchSchema(), finalityBranch),
           syncAggregate(),
           SszUInt64.of(signatureSlot));
