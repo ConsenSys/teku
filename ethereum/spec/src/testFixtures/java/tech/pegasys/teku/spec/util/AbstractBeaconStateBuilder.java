@@ -35,6 +35,8 @@ import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields;
+import tech.pegasys.teku.spec.datastructures.util.Eip8015RemovedFields;
 
 @SuppressWarnings("unchecked")
 public abstract class AbstractBeaconStateBuilder<
@@ -111,9 +113,12 @@ public abstract class AbstractBeaconStateBuilder<
                   state.getBlockRoots().setAll(blockRoots);
                   state.getStateRoots().setAll(stateRoots);
                   state.getHistoricalRoots().setAll(historicalRoots);
-                  state.setEth1Data(eth1Data);
-                  state.getEth1DataVotes().setAll(eth1DataVotes);
-                  state.setEth1DepositIndex(eth1DepositIndex);
+                  // The Eth1 fields were removed in Heze (EIP-8015)
+                  if (hasEth1Fields()) {
+                    state.setEth1Data(eth1Data);
+                    state.getEth1DataVotes().setAll(eth1DataVotes);
+                    state.setEth1DepositIndex(eth1DepositIndex);
+                  }
                   state.getValidators().setAll(validators);
                   state.getBalances().setAll(balances);
                   state.getRandaoMixes().setAll(randaoMixes);
@@ -125,6 +130,13 @@ public abstract class AbstractBeaconStateBuilder<
 
                   setUniqueFields((TStateMutable) state);
                 });
+  }
+
+  protected boolean hasEth1Fields() {
+    return spec.getSchemaDefinitions()
+            .getBeaconStateSchema()
+            .getFieldIndex(BeaconStateFields.ETH1_DATA)
+        >= 0;
   }
 
   protected void initDefaults() {
@@ -155,11 +167,13 @@ public abstract class AbstractBeaconStateBuilder<
             dataStructureUtil::randomBytes32);
     eth1Data = dataStructureUtil.randomEth1Data();
     eth1DataVotes =
-        dataStructureUtil.randomSszList(
-            dataStructureUtil.getBeaconStateSchema().getEth1DataVotesSchema(),
-            dataStructureUtil.getEpochsPerEth1VotingPeriod()
-                * (long) dataStructureUtil.getSlotsPerEpoch(),
-            dataStructureUtil::randomEth1Data);
+        hasEth1Fields()
+            ? dataStructureUtil.randomSszList(
+                dataStructureUtil.getBeaconStateSchema().getEth1DataVotesSchema(),
+                dataStructureUtil.getEpochsPerEth1VotingPeriod()
+                    * (long) dataStructureUtil.getSlotsPerEpoch(),
+                dataStructureUtil::randomEth1Data)
+            : Eip8015RemovedFields.EMPTY_ETH1_DATA_VOTES;
     eth1DepositIndex = dataStructureUtil.randomUInt64();
     validators =
         dataStructureUtil.randomSszList(

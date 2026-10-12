@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.schemas;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -51,11 +52,13 @@ class ProgressiveListLimitsSanityTest {
    */
   private static final long NO_LIMIT = Long.MAX_VALUE;
 
+  private SpecMilestone milestone;
   private SpecConfigGloas config;
   private SchemaDefinitionsGloas schemaDefinitions;
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
+    milestone = specContext.getSpecMilestone();
     config = SpecConfigGloas.required(specContext.getSpec().getGenesisSpecConfig());
     schemaDefinitions = SchemaDefinitionsGloas.required(specContext.getSchemaDefinitions());
   }
@@ -84,17 +87,19 @@ class ProgressiveListLimitsSanityTest {
   }
 
   private Map<SszFieldName, Long> expectedBlockBodyLimits() {
-    return Map.ofEntries(
-        Map.entry(BlockBodyFields.PROPOSER_SLASHINGS, (long) config.getMaxProposerSlashings()),
-        Map.entry(
-            BlockBodyFields.ATTESTER_SLASHINGS, (long) config.getMaxAttesterSlashingsElectra()),
-        Map.entry(BlockBodyFields.ATTESTATIONS, (long) config.getMaxAttestationsElectra()),
-        // blocks must not contain deposits from Gloas onwards
-        Map.entry(BlockBodyFields.DEPOSITS, 0L),
-        Map.entry(BlockBodyFields.VOLUNTARY_EXITS, (long) config.getMaxVoluntaryExits()),
-        Map.entry(
-            BlockBodyFields.BLS_TO_EXECUTION_CHANGES, (long) config.getMaxBlsToExecutionChanges()),
-        Map.entry(BlockBodyFields.PAYLOAD_ATTESTATIONS, (long) config.getMaxPayloadAttestations()));
+    final Map<SszFieldName, Long> limits = new HashMap<>();
+    limits.put(BlockBodyFields.PROPOSER_SLASHINGS, (long) config.getMaxProposerSlashings());
+    limits.put(BlockBodyFields.ATTESTER_SLASHINGS, (long) config.getMaxAttesterSlashingsElectra());
+    limits.put(BlockBodyFields.ATTESTATIONS, (long) config.getMaxAttestationsElectra());
+    // Gloas blocks must not contain deposits, and Heze removes the field (EIP-8015)
+    if (milestone.isLessThan(SpecMilestone.HEZE)) {
+      limits.put(BlockBodyFields.DEPOSITS, 0L);
+    }
+    limits.put(BlockBodyFields.VOLUNTARY_EXITS, (long) config.getMaxVoluntaryExits());
+    limits.put(
+        BlockBodyFields.BLS_TO_EXECUTION_CHANGES, (long) config.getMaxBlsToExecutionChanges());
+    limits.put(BlockBodyFields.PAYLOAD_ATTESTATIONS, (long) config.getMaxPayloadAttestations());
+    return limits;
   }
 
   private Map<SszFieldName, Long> expectedExecutionRequestsLimits() {

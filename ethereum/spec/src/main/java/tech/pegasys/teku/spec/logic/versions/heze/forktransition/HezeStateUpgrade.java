@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.logic.versions.heze.forktransition;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidSchemaHeze;
@@ -43,6 +45,13 @@ public class HezeStateUpgrade implements StateUpgrade<BeaconStateGloas> {
   public BeaconStateGloas upgrade(final BeaconState preState) {
     final UInt64 epoch = beaconStateAccessors.getCurrentEpoch(preState);
     final BeaconStateGloas preStateGloas = BeaconStateGloas.required(preState);
+    // EIP-8015: check that the old deposit mechanism has been disabled
+    checkState(
+        preStateGloas.getEth1DepositIndex().equals(preStateGloas.getDepositRequestsStartIndex()),
+        "Can't upgrade to Heze before the Eth1 deposit bridge is finished: eth1_deposit_index %s,"
+            + " deposit_requests_start_index %s",
+        preStateGloas.getEth1DepositIndex(),
+        preStateGloas.getDepositRequestsStartIndex());
     final ExecutionPayloadBidSchemaHeze executionPayloadBidSchema =
         schemaDefinitions.getExecutionPayloadBidSchema();
 
@@ -68,7 +77,6 @@ public class HezeStateUpgrade implements StateUpgrade<BeaconStateGloas> {
               state.setNextWithdrawalValidatorIndex(
                   preStateGloas.getNextWithdrawalValidatorIndex());
               state.setHistoricalSummaries(preStateGloas.getHistoricalSummaries());
-              state.setDepositRequestsStartIndex(preStateGloas.getDepositRequestsStartIndex());
               state.setDepositBalanceToConsume(preStateGloas.getDepositBalanceToConsume());
               state.setExitBalanceToConsume(preStateGloas.getExitBalanceToConsume());
               state.setEarliestExitEpoch(preStateGloas.getEarliestExitEpoch());

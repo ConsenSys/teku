@@ -28,9 +28,9 @@ import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 
 public class BeaconBlockBodyBuilderGloas extends BeaconBlockBodyBuilderElectra {
 
-  private SignedExecutionPayloadBid signedExecutionPayloadBid;
-  private SszList<PayloadAttestation> payloadAttestations;
-  private ExecutionRequests parentExecutionRequests;
+  protected SignedExecutionPayloadBid signedExecutionPayloadBid;
+  protected SszList<PayloadAttestation> payloadAttestations;
+  protected ExecutionRequests parentExecutionRequests;
 
   public BeaconBlockBodyBuilderGloas(
       final BeaconBlockBodySchema<? extends BeaconBlockBodyGloas> schema) {

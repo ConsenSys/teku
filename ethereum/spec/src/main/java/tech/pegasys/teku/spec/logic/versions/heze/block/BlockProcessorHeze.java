@@ -13,10 +13,12 @@
 
 package tech.pegasys.teku.spec.logic.versions.heze.block;
 
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
@@ -26,7 +28,9 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCode
 import tech.pegasys.teku.spec.datastructures.execution.NewPayloadRequest;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
+import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.logic.common.operations.OperationSignatureVerifier;
 import tech.pegasys.teku.spec.logic.common.operations.validation.OperationValidator;
@@ -82,6 +86,38 @@ public class BlockProcessorHeze extends BlockProcessorGloas {
         executionRequestsDataCodec,
         executionRequestsProcessor);
     this.executionRequestsDataCodec = executionRequestsDataCodec;
+  }
+
+  /** {@code process_eth1_data} was removed in Heze (EIP-8015). */
+  @Override
+  protected void processEth1Data(final MutableBeaconState state, final BeaconBlockBody body) {}
+
+  /** The Heze block body has no {@code deposits} (EIP-8015). */
+  @Override
+  protected void verifyOutstandingDepositsAreProcessed(
+      final BeaconState state, final BeaconBlockBody body) {}
+
+  /** The Heze block body has no {@code deposits} (EIP-8015). */
+  @Override
+  protected void processBodyDeposits(final MutableBeaconState state, final BeaconBlockBody body) {}
+
+  /**
+   * Only used to build genesis states, which have no {@code eth1_deposit_index} in Heze (EIP-8015).
+   */
+  @Override
+  public void processDepositWithoutCheckingMerkleProof(
+      final MutableBeaconState state,
+      final Deposit deposit,
+      final Optional<Object2IntMap<BLSPublicKey>> maybePubkeyToIndexMap,
+      final boolean signatureAlreadyVerified) {
+    applyDeposit(
+        state,
+        deposit.getData().getPubkey(),
+        deposit.getData().getWithdrawalCredentials(),
+        deposit.getData().getAmount(),
+        deposit.getData().getSignature(),
+        maybePubkeyToIndexMap,
+        signatureAlreadyVerified);
   }
 
   @Override

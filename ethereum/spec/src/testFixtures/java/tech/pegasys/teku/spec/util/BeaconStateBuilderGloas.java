@@ -110,7 +110,10 @@ public class BeaconStateBuilderGloas
     state.setLatestExecutionPayloadBid(latestExecutionPayloadBid);
     state.setNextWithdrawalIndex(nextWithdrawalIndex);
     state.setNextWithdrawalValidatorIndex(nextWithdrawalValidatorIndex);
-    state.setDepositRequestsStartIndex(depositRequestsStartIndex);
+    // deposit_requests_start_index was removed in Heze (EIP-8015)
+    if (hasEth1Fields()) {
+      state.setDepositRequestsStartIndex(depositRequestsStartIndex);
+    }
     state.setDepositBalanceToConsume(depositBalanceToConsume);
     state.setExitBalanceToConsume(exitBalanceToConsume);
     state.setEarliestExitEpoch(earliestExitEpoch);

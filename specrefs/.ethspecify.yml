@@ -56,8 +56,6 @@ specrefs:
       - IndexedAttestation#gloas
 
       # Not implemented: heze
-      - BeaconBlockBody#heze
-      - BeaconState#heze
       - ExecutionPayloadBid#heze
       - SignedExecutionPayloadBid#heze
       - InclusionListBits#heze
@@ -306,17 +304,12 @@ specrefs:
       - on_execution_payload_envelope#heze
       - on_inclusion_list#heze
       - prepare_execution_payload#heze
-      - process_block#heze
-      - process_epoch#heze
       - process_inclusion_list#heze
-      - process_operations#heze
       - record_payload_inclusion_list_satisfaction#heze
       - should_extend_payload#heze
-      - upgrade_to_heze#heze
       - get_inclusion_list_due_ms#heze
       - get_signed_inclusion_list#heze
       - validate_execution_payload_bid_gossip#heze
-      - verify_block_body_operation_limits#heze
 
     presets:
       # Not implemented yet: EIP-7688 progressive SSZ sizing work

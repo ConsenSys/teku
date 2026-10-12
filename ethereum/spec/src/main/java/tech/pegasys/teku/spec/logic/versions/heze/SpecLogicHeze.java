@@ -50,6 +50,7 @@ import tech.pegasys.teku.spec.logic.versions.gloas.util.ProposerPreferencesUtilG
 import tech.pegasys.teku.spec.logic.versions.gloas.weaksubjectivity.WeakSubjectivityCalculatorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.withdrawals.WithdrawalsHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.heze.block.BlockProcessorHeze;
+import tech.pegasys.teku.spec.logic.versions.heze.execution.ExecutionRequestsProcessorHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.forktransition.HezeStateUpgrade;
 import tech.pegasys.teku.spec.logic.versions.heze.helpers.BeaconStateAccessorsHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.helpers.MiscHelpersHeze;
@@ -198,7 +199,7 @@ public class SpecLogicHeze extends AbstractSpecLogic {
         new WithdrawalsHelpersGloas(
             schemaDefinitions, miscHelpers, config, predicates, beaconStateMutators);
     final ExecutionRequestsProcessorGloas executionRequestsProcessor =
-        new ExecutionRequestsProcessorGloas(
+        new ExecutionRequestsProcessorHeze(
             schemaDefinitions,
             miscHelpers,
             config,

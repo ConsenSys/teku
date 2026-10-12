@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -26,6 +27,7 @@ import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.interop.GenesisStateBuilder;
 import tech.pegasys.teku.spec.datastructures.operations.DepositData;
 import tech.pegasys.teku.spec.datastructures.state.BeaconStateTestBuilder;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -33,6 +35,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDepos
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.datastructures.util.DepositGenerator;
+import tech.pegasys.teku.spec.datastructures.util.Eip8015RemovedFields;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.EpochProcessor;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -48,6 +51,26 @@ class EpochProcessorHezeTest {
   @Test
   void shouldUseHezeEpochProcessor() {
     assertThat(epochProcessor).isInstanceOf(EpochProcessorHeze.class);
+  }
+
+  @Test
+  void genesisAndProcessEpoch_shouldNotAccessFieldsRemovedByEip8015() throws Exception {
+    // The last slot of an Eth1 voting period, where Gloas resets eth1_data_votes
+    final UInt64 slotsPerVotingPeriod =
+        UInt64.valueOf(
+            (long) spec.getGenesisSpecConfig().getEpochsPerEth1VotingPeriod()
+                * spec.getSlotsPerEpoch(UInt64.ZERO));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(Eip8015RemovedFields.class)) {
+      final BeaconState genesisState =
+          new GenesisStateBuilder().spec(spec).addMockValidators(16).build();
+      final BeaconState preState =
+          genesisState.updated(state -> state.setSlot(slotsPerVotingPeriod.minus(1)));
+
+      epochProcessor.processEpoch(preState);
+
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
   }
 
   @Test

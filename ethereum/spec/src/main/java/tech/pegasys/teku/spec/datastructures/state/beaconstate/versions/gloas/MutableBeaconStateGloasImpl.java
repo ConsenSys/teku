@@ -26,11 +26,11 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.V
 public class MutableBeaconStateGloasImpl extends AbstractMutableBeaconState<BeaconStateGloasImpl>
     implements MutableBeaconStateGloas, BeaconStateCache, ValidatorStatsAltair {
 
-  MutableBeaconStateGloasImpl(final BeaconStateGloasImpl backingImmutableView) {
+  protected MutableBeaconStateGloasImpl(final BeaconStateGloasImpl backingImmutableView) {
     super(backingImmutableView);
   }
 
-  MutableBeaconStateGloasImpl(
+  protected MutableBeaconStateGloasImpl(
       final BeaconStateGloasImpl backingImmutableView, final boolean builder) {
     super(backingImmutableView, builder);
   }

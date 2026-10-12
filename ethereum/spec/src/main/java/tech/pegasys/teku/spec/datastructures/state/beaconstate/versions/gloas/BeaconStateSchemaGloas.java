@@ -98,6 +98,12 @@ public class BeaconStateSchemaGloas
     super(schemaName, ACTIVE_FIELDS, getUniqueFields(specConfig, schemaRegistry), specConfig);
   }
 
+  /** For later milestones that remove fields, leaving gaps in {@code activeFields}. */
+  protected BeaconStateSchemaGloas(
+      final String schemaName, final boolean[] activeFields, final List<SszField> allFields) {
+    super(schemaName, activeFields, allFields);
+  }
+
   private static SszField toProgressiveListFieldIfListed(final SszField field) {
     if (!PROGRESSIVE_INLINE_LIST_FIELD_NAMES.contains(field.getName())) {
       return field;
@@ -107,7 +113,7 @@ public class BeaconStateSchemaGloas
     return new SszField(field.getIndex(), field.getName(), () -> progressiveSchema);
   }
 
-  private static List<SszField> getUniqueFields(
+  protected static List<SszField> getUniqueFields(
       final SpecConfig specConfig, final SchemaRegistry schemaRegistry) {
     final List<SszField> newFields =
         List.of(

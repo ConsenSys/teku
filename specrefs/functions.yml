@@ -9856,6 +9856,28 @@
         process_sync_aggregate(state, block.body.sync_aggregate)
     </spec>
 
+- name: process_block#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/block/AbstractBlockProcessor.java
+      search: protected void processBlock(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/block/BlockProcessorHeze.java
+      search: protected void processEth1Data(
+  spec: |
+    <spec fn="process_block" fork="heze" hash="217d6454">
+    def process_block(state: BeaconState, block: BeaconBlock) -> None:
+        parent_slot = state.latest_block_header.slot
+
+        process_parent_execution_payload(state, block)
+        process_block_header(state, block)
+        process_withdrawals(state)
+        process_execution_payload_bid(state, block.body.signed_execution_payload_bid)
+        process_randao(state, block.body)
+        # [Modified in Heze:EIP8015]
+        # Removed `process_eth1_data`
+        process_operations(state, block.body, parent_slot)
+        process_sync_aggregate(state, block.body.sync_aggregate)
+    </spec>
+
 - name: process_block_header#phase0
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/block/AbstractBlockProcessor.java
@@ -10373,6 +10395,35 @@
         process_sync_committee_updates(state)
         process_proposer_lookahead(state)
         # [New in Gloas:EIP7732]
+        process_ptc_window(state)
+    </spec>
+
+- name: process_epoch#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/statetransition/epoch/AbstractEpochProcessor.java
+      search: public BeaconState processEpoch(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/statetransition/epoch/EpochProcessorHeze.java
+      search: public void processEth1DataReset(
+  spec: |
+    <spec fn="process_epoch" fork="heze" hash="782cef80">
+    def process_epoch(state: BeaconState) -> None:
+        process_justification_and_finalization(state)
+        process_inactivity_updates(state)
+        process_rewards_and_penalties(state)
+        process_registry_updates(state)
+        process_slashings(state)
+        # [Modified in Heze:EIP8015]
+        # Removed `process_eth1_data_reset`
+        process_pending_deposits(state)
+        process_pending_consolidations(state)
+        process_builder_pending_payments(state)
+        process_effective_balance_updates(state)
+        process_slashings_reset(state)
+        process_randao_mixes_reset(state)
+        process_historical_summaries_update(state)
+        process_participation_flag_updates(state)
+        process_sync_committee_updates(state)
+        process_proposer_lookahead(state)
         process_ptc_window(state)
     </spec>
 
@@ -11067,6 +11118,34 @@
         # [Modified in Gloas:EIP7732]
         # Removed `process_consolidation_request`
         # [New in Gloas:EIP7732]
+        for_ops(body.payload_attestations, process_payload_attestation)
+    </spec>
+
+- name: process_operations#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/block/BlockProcessorGloas.java
+      search: protected void processOperationsNoValidation(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/block/BlockProcessorHeze.java
+      search: protected void processBodyDeposits(
+  spec: |
+    <spec fn="process_operations" fork="heze" hash="d70acce9">
+    def process_operations(state: BeaconState, body: BeaconBlockBody, parent_slot: Slot) -> None:
+        def for_ops(operations: Sequence[Any], fn: Callable[..., None], *args: Any) -> None:
+            for operation in operations:
+                fn(state, operation, *args)
+
+        assert len(body.proposer_slashings) <= MAX_PROPOSER_SLASHINGS
+        assert len(body.attester_slashings) <= MAX_ATTESTER_SLASHINGS_ELECTRA
+        assert len(body.attestations) <= MAX_ATTESTATIONS_ELECTRA
+        assert len(body.voluntary_exits) <= MAX_VOLUNTARY_EXITS
+        assert len(body.bls_to_execution_changes) <= MAX_BLS_TO_EXECUTION_CHANGES
+        assert len(body.payload_attestations) <= MAX_PAYLOAD_ATTESTATIONS
+
+        for_ops(body.proposer_slashings, process_proposer_slashing)
+        for_ops(body.attester_slashings, process_attester_slashing)
+        for_ops(body.attestations, process_attestation, parent_slot)
+        for_ops(body.voluntary_exits, process_voluntary_exit)
+        for_ops(body.bls_to_execution_changes, process_bls_to_execution_change)
         for_ops(body.payload_attestations, process_payload_attestation)
     </spec>
 
@@ -13685,6 +13764,97 @@
 
         # [New in Gloas:EIP7732]
         onboard_builders_from_pending_deposits(post)
+
+        return post
+    </spec>
+
+- name: upgrade_to_heze#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/forktransition/HezeStateUpgrade.java
+      search: public BeaconStateGloas upgrade(
+  spec: |
+    <spec fn="upgrade_to_heze" fork="heze" hash="f1eba363">
+    def upgrade_to_heze(pre: gloas.BeaconState) -> BeaconState:
+        # [New in Heze:EIP8015]
+        # Check that the old deposit mechanism has been disabled
+        assert pre.eth1_deposit_index == pre.deposit_requests_start_index
+
+        epoch = gloas.get_current_epoch(pre)
+        latest_execution_payload_bid = ExecutionPayloadBid(
+            parent_block_hash=pre.latest_execution_payload_bid.parent_block_hash,
+            parent_block_root=pre.latest_execution_payload_bid.parent_block_root,
+            block_hash=pre.latest_execution_payload_bid.block_hash,
+            prev_randao=pre.latest_execution_payload_bid.prev_randao,
+            fee_recipient=pre.latest_execution_payload_bid.fee_recipient,
+            gas_limit=pre.latest_execution_payload_bid.gas_limit,
+            builder_index=pre.latest_execution_payload_bid.builder_index,
+            slot=pre.latest_execution_payload_bid.slot,
+            value=pre.latest_execution_payload_bid.value,
+            execution_payment=pre.latest_execution_payload_bid.execution_payment,
+            blob_kzg_commitments=pre.latest_execution_payload_bid.blob_kzg_commitments,
+            execution_requests_root=pre.latest_execution_payload_bid.execution_requests_root,
+            # [New in Heze:EIP7805]
+            inclusion_list_bits=InclusionListBits(),
+        )
+
+        post = BeaconState(
+            genesis_time=pre.genesis_time,
+            genesis_validators_root=pre.genesis_validators_root,
+            slot=pre.slot,
+            fork=Fork(
+                previous_version=pre.fork.current_version,
+                # [Modified in Heze]
+                current_version=HEZE_FORK_VERSION,
+                epoch=epoch,
+            ),
+            latest_block_header=pre.latest_block_header,
+            block_roots=pre.block_roots,
+            state_roots=pre.state_roots,
+            historical_roots=pre.historical_roots,
+            # [Modified in Heze:EIP8015]
+            # Removed `eth1_data`
+            # [Modified in Heze:EIP8015]
+            # Removed `eth1_data_votes`
+            # [Modified in Heze:EIP8015]
+            # Removed `eth1_deposit_index`
+            validators=pre.validators,
+            balances=pre.balances,
+            randao_mixes=pre.randao_mixes,
+            slashings=pre.slashings,
+            previous_epoch_participation=pre.previous_epoch_participation,
+            current_epoch_participation=pre.current_epoch_participation,
+            justification_bits=pre.justification_bits,
+            previous_justified_checkpoint=pre.previous_justified_checkpoint,
+            current_justified_checkpoint=pre.current_justified_checkpoint,
+            finalized_checkpoint=pre.finalized_checkpoint,
+            inactivity_scores=pre.inactivity_scores,
+            current_sync_committee=pre.current_sync_committee,
+            next_sync_committee=pre.next_sync_committee,
+            latest_block_hash=pre.latest_block_hash,
+            next_withdrawal_index=pre.next_withdrawal_index,
+            next_withdrawal_validator_index=pre.next_withdrawal_validator_index,
+            historical_summaries=pre.historical_summaries,
+            # [Modified in Heze:EIP8015]
+            # Removed `deposit_requests_start_index`
+            deposit_balance_to_consume=pre.deposit_balance_to_consume,
+            exit_balance_to_consume=pre.exit_balance_to_consume,
+            earliest_exit_epoch=pre.earliest_exit_epoch,
+            consolidation_balance_to_consume=pre.consolidation_balance_to_consume,
+            earliest_consolidation_epoch=pre.earliest_consolidation_epoch,
+            pending_deposits=pre.pending_deposits,
+            pending_partial_withdrawals=pre.pending_partial_withdrawals,
+            pending_consolidations=pre.pending_consolidations,
+            proposer_lookahead=pre.proposer_lookahead,
+            builders=pre.builders,
+            next_withdrawal_builder_index=pre.next_withdrawal_builder_index,
+            execution_payload_availability=pre.execution_payload_availability,
+            builder_pending_payments=pre.builder_pending_payments,
+            builder_pending_withdrawals=pre.builder_pending_withdrawals,
+            # [Modified in Heze:EIP7805]
+            latest_execution_payload_bid=latest_execution_payload_bid,
+            payload_expected_withdrawals=pre.payload_expected_withdrawals,
+            ptc_window=pre.ptc_window,
+        )
 
         return post
     </spec>
@@ -17221,6 +17391,42 @@
         # [REJECT] The block contains no deposits
         if len(body.deposits) != 0:
             raise GossipReject("block must not contain deposits")
+
+        # [REJECT] The voluntary exit count is within the limit
+        if len(body.voluntary_exits) > MAX_VOLUNTARY_EXITS:
+            raise GossipReject("too many voluntary exits")
+
+        # [REJECT] The BLS to execution change count is within the limit
+        if len(body.bls_to_execution_changes) > MAX_BLS_TO_EXECUTION_CHANGES:
+            raise GossipReject("too many bls to execution changes")
+
+        # [REJECT] The payload attestation count is within the limit
+        if len(body.payload_attestations) > MAX_PAYLOAD_ATTESTATIONS:
+            raise GossipReject("too many payload attestations")
+    </spec>
+
+- name: verify_block_body_operation_limits#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/blocks/blockbody/versions/heze/BeaconBlockBodySchemaHezeImpl.java
+      search: public static BeaconBlockBodySchemaHezeImpl create(
+  spec: |
+    <spec fn="verify_block_body_operation_limits" fork="heze" hash="e26d062e">
+    def verify_block_body_operation_limits(body: BeaconBlockBody) -> None:
+        """
+        Verify that each block body operation count is within its limit.
+        Raises GossipReject on validation failure.
+        """
+        # [REJECT] The proposer slashing count is within the limit
+        if len(body.proposer_slashings) > MAX_PROPOSER_SLASHINGS:
+            raise GossipReject("too many proposer slashings")
+
+        # [REJECT] The attester slashing count is within the limit
+        if len(body.attester_slashings) > MAX_ATTESTER_SLASHINGS_ELECTRA:
+            raise GossipReject("too many attester slashings")
+
+        # [REJECT] The attestation count is within the limit
+        if len(body.attestations) > MAX_ATTESTATIONS_ELECTRA:
+            raise GossipReject("too many attestations")
 
         # [REJECT] The voluntary exit count is within the limit
         if len(body.voluntary_exits) > MAX_VOLUNTARY_EXITS:

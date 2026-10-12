@@ -51,6 +51,10 @@ public class EpochProcessorHeze extends EpochProcessorGloas {
         timeProvider);
   }
 
+  /** {@code process_eth1_data_reset} was removed in Heze (EIP-8015). */
+  @Override
+  public void processEth1DataReset(final MutableBeaconState state) {}
+
   /**
    * apply_pending_deposit
    *

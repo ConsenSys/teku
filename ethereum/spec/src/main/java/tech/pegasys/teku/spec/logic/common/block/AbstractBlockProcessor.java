@@ -466,10 +466,15 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
               state, body.getAttesterSlashings(), validatorExitContextSupplier);
           processAttestationsNoVerification(
               state, body.getAttestations(), indexedAttestationCache, parentSlot);
-          processDeposits(state, body.getDeposits());
+          processBodyDeposits(state, body);
           processVoluntaryExitsNoValidation(
               state, body.getVoluntaryExits(), validatorExitContextSupplier);
         });
+  }
+
+  protected void processBodyDeposits(final MutableBeaconState state, final BeaconBlockBody body)
+      throws BlockProcessingException {
+    processDeposits(state, body.getDeposits());
   }
 
   protected void verifyOutstandingDepositsAreProcessed(

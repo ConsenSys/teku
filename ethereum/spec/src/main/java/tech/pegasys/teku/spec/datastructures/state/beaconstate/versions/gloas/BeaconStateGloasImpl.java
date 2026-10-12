@@ -30,18 +30,19 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.V
 public class BeaconStateGloasImpl extends AbstractBeaconState<MutableBeaconStateGloas>
     implements BeaconStateGloas, BeaconStateCache, ValidatorStatsAltair {
 
-  BeaconStateGloasImpl(final BeaconStateSchema<BeaconStateGloas, MutableBeaconStateGloas> schema) {
+  protected BeaconStateGloasImpl(
+      final BeaconStateSchema<BeaconStateGloas, MutableBeaconStateGloas> schema) {
     super(schema);
   }
 
-  BeaconStateGloasImpl(
+  protected BeaconStateGloasImpl(
       final BeaconStateSchema<BeaconStateGloas, MutableBeaconStateGloas> schema,
       final TransitionCaches transitionCaches,
       final SlotCaches slotCaches) {
     super(schema, schema.getDefaultTree(), null, transitionCaches, slotCaches);
   }
 
-  BeaconStateGloasImpl(
+  protected BeaconStateGloasImpl(
       final SszCompositeSchema<?> type,
       final TreeNode backingNode,
       final IntCache<SszData> cache,
@@ -50,7 +51,7 @@ public class BeaconStateGloasImpl extends AbstractBeaconState<MutableBeaconState
     super(type, backingNode, cache, transitionCaches, slotCaches);
   }
 
-  BeaconStateGloasImpl(
+  protected BeaconStateGloasImpl(
       final AbstractSszContainerSchema<? extends SszContainer> type, final TreeNode backingNode) {
     super(type, backingNode);
   }

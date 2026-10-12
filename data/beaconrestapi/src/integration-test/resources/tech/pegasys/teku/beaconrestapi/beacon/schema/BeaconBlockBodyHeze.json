@@ -1,16 +1,13 @@
 {
   "title" : "BeaconBlockBodyHeze",
   "type" : "object",
-  "required" : [ "randao_reveal", "eth1_data", "graffiti", "proposer_slashings", "attester_slashings", "attestations", "deposits", "voluntary_exits", "sync_aggregate", "bls_to_execution_changes", "signed_execution_payload_bid", "payload_attestations", "parent_execution_requests" ],
+  "required" : [ "randao_reveal", "graffiti", "proposer_slashings", "attester_slashings", "attestations", "voluntary_exits", "sync_aggregate", "bls_to_execution_changes", "signed_execution_payload_bid", "payload_attestations", "parent_execution_requests" ],
   "properties" : {
     "randao_reveal" : {
       "type" : "string",
       "pattern" : "^0x[a-fA-F0-9]{2,}$",
       "description" : "SSZ hexadecimal",
       "format" : "bytes"
-    },
-    "eth1_data" : {
-      "$ref" : "#/components/schemas/Eth1Data"
     },
     "graffiti" : {
       "type" : "string",
@@ -34,12 +31,6 @@
       "type" : "array",
       "items" : {
         "$ref" : "#/components/schemas/AttestationGloas"
-      }
-    },
-    "deposits" : {
-      "type" : "array",
-      "items" : {
-        "$ref" : "#/components/schemas/Deposit"
       }
     },
     "voluntary_exits" : {

@@ -122,10 +122,12 @@ public enum BeaconStateFields implements SszFieldName {
     state.setBlockRoots(source.getBlockRoots());
     state.setStateRoots(source.getStateRoots());
     state.setHistoricalRoots(source.getHistoricalRoots());
-    // Eth1
-    state.setEth1Data(source.getEth1Data());
-    state.setEth1DataVotes(source.getEth1DataVotes());
-    state.setEth1DepositIndex(source.getEth1DepositIndex());
+    // Eth1 (removed in Heze by EIP-8015)
+    if (state.getSchema().getFieldIndex(ETH1_DATA) >= 0) {
+      state.setEth1Data(source.getEth1Data());
+      state.setEth1DataVotes(source.getEth1DataVotes());
+      state.setEth1DepositIndex(source.getEth1DepositIndex());
+    }
     // Registry
     state.setValidators(source.getValidators());
     state.setBalances(source.getBalances());
@@ -211,7 +213,7 @@ public enum BeaconStateFields implements SszFieldName {
         : SszSchemaHints.none();
   }
 
-  static List<SszField> getCommonFields(final SpecConfig specConfig) {
+  public static List<SszField> getCommonFields(final SpecConfig specConfig) {
     SszField forkField = new SszField(3, BeaconStateFields.FORK, Fork.SSZ_SCHEMA);
     final BeaconBlockHeader.BeaconBlockHeaderSchema blockHeaderSchema =
         BeaconBlockHeader.SSZ_SCHEMA;

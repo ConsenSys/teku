@@ -57,7 +57,10 @@ public interface BeaconStateElectra extends BeaconStateDeneb {
   static void describeCustomElectraFields(
       final MoreObjects.ToStringHelper stringBuilder, final BeaconStateElectra state) {
     BeaconStateDeneb.describeCustomDenebFields(stringBuilder, state);
-    stringBuilder.add("deposit_requests_start_index", state.getDepositRequestsStartIndex());
+    // deposit_requests_start_index was removed in Heze (EIP-8015)
+    if (state.getSchema().getFieldIndex(DEPOSIT_REQUESTS_START_INDEX) >= 0) {
+      stringBuilder.add("deposit_requests_start_index", state.getDepositRequestsStartIndex());
+    }
     stringBuilder.add("deposit_balance_to_consume", state.getDepositBalanceToConsume());
     stringBuilder.add("exit_balance_to_consume", state.getExitBalanceToConsume());
     stringBuilder.add("earliest_exit_epoch", state.getEarliestExitEpoch());
