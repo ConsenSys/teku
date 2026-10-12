@@ -15,9 +15,9 @@ package tech.pegasys.teku.networking.eth2.gossip.subnets;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
-import java.util.NavigableMap;
-import java.util.TreeMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
@@ -29,7 +29,7 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   private final Int2ObjectMap<UInt64> subcommitteeToUnsubscribeSlot = new Int2ObjectOpenHashMap<>();
   final Eth2P2PNetwork p2PNetwork;
 
-  private final NavigableMap<UInt64, UInt64> dutyEndSlotToStartSlot = new TreeMap<>();
+  private final Int2ObjectMap<UInt64> validatorToDutyEndSlot = new Int2ObjectOpenHashMap<>();
 
   public SyncCommitteeSubscriptionManager(final Eth2P2PNetwork p2PNetwork) {
     this.p2PNetwork = p2PNetwork;
@@ -69,16 +69,15 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
     }
   }
 
-  public synchronized void recordDuty(final UInt64 startSlot, final UInt64 endSlot) {
-    dutyEndSlotToStartSlot.merge(endSlot, startSlot, UInt64::min);
+  public synchronized void recordDuty(final int validatorIndex, final UInt64 endSlot) {
+    validatorToDutyEndSlot.merge(validatorIndex, endSlot, UInt64::max);
   }
 
-  public synchronized boolean hasDutyActiveAt(final UInt64 slot) {
-    return dutyEndSlotToStartSlot.tailMap(slot, false).values().stream()
-        .anyMatch(startSlot -> startSlot.isLessThanOrEqualTo(slot));
+  public synchronized IntSet getValidatorsWithDuty() {
+    return new IntOpenHashSet(validatorToDutyEndSlot.keySet());
   }
 
   protected synchronized void pruneDuties(final UInt64 slot) {
-    dutyEndSlotToStartSlot.headMap(slot, true).clear();
+    validatorToDutyEndSlot.values().removeIf(endSlot -> endSlot.isLessThanOrEqualTo(slot));
   }
 }

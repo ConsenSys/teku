@@ -30,6 +30,7 @@ import static tech.pegasys.teku.statetransition.util.RPCFetchDelayProvider.DEFAU
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Throwables;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import java.io.IOException;
 import java.net.BindException;
 import java.nio.file.Path;
@@ -2285,21 +2286,33 @@ public class BeaconChainController extends Service implements BeaconChainControl
     lightClientFinalityUpdateValidator.ifPresent(
         validator ->
             lightClientServerService.subscribeToFinalityUpdatesToPublish(
-                update -> {
-                  if (hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
-                      && validator.markForwarded(update)) {
-                    p2pNetwork.publishLightClientFinalityUpdate(update);
-                  }
-                }));
+                update ->
+                    hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
+                        .thenAccept(
+                            hasDuty -> {
+                              if (hasDuty && validator.markForwarded(update)) {
+                                p2pNetwork.publishLightClientFinalityUpdate(update);
+                              }
+                            })
+                        .finish(
+                            error ->
+                                LOG.error(
+                                    "Failed to publish light client finality update", error))));
     lightClientOptimisticUpdateValidator.ifPresent(
         validator ->
             lightClientServerService.subscribeToOptimisticUpdatesToPublish(
-                update -> {
-                  if (hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
-                      && validator.markForwarded(update)) {
-                    p2pNetwork.publishLightClientOptimisticUpdate(update);
-                  }
-                }));
+                update ->
+                    hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
+                        .thenAccept(
+                            hasDuty -> {
+                              if (hasDuty && validator.markForwarded(update)) {
+                                p2pNetwork.publishLightClientOptimisticUpdate(update);
+                              }
+                            })
+                        .finish(
+                            error ->
+                                LOG.error(
+                                    "Failed to publish light client optimistic update", error))));
 
     eventChannels.subscribe(
         CustodyGroupCountChannel.class,
@@ -2319,12 +2332,33 @@ public class BeaconChainController extends Service implements BeaconChainControl
                         "Failed to get NodeId from Discovery System"));
   }
 
-  private boolean hasLocalSyncCommitteeDutyAt(final UInt64 slot) {
+  private SafeFuture<Boolean> hasLocalSyncCommitteeDutyAt(final UInt64 slot) {
     final SyncCommitteeSubscriptionManager subscriptionManager = syncCommitteeSubscriptionManager;
     if (subscriptionManager == null) {
-      return false;
+      return SafeFuture.completedFuture(false);
     }
-    return subscriptionManager.hasDutyActiveAt(slot);
+    final IntSet validators = subscriptionManager.getValidatorsWithDuty();
+    if (validators.isEmpty()) {
+      return SafeFuture.completedFuture(false);
+    }
+    return recentChainData
+        .getBestState()
+        .map(state -> state.thenApply(s -> isInSyncCommitteeAt(s, slot, validators)))
+        .orElse(SafeFuture.completedFuture(false));
+  }
+
+  private boolean isInSyncCommitteeAt(
+      final BeaconState state, final UInt64 slot, final IntSet validators) {
+    final UInt64 epoch = spec.computeEpochAtSlot(slot);
+    return spec.getSyncCommitteeUtil(slot)
+        .filter(util -> util.isStateUsableForCommitteeCalculationAtEpoch(state, epoch))
+        .map(util -> util.getSyncSubcommittees(state, epoch))
+        .map(
+            assignments ->
+                validators
+                    .intStream()
+                    .anyMatch(index -> assignments.containsKey(UInt64.valueOf(index))))
+        .orElse(false);
   }
 
   protected Eth2P2PNetworkBuilder createEth2P2PNetworkBuilder() {

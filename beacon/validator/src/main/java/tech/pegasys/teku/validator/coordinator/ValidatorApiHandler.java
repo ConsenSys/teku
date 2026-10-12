@@ -747,24 +747,11 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final IntSet syncCommitteeIndices = subscription.syncCommitteeIndices();
       performanceTracker.saveExpectedSyncCommitteeParticipant(
           subscription.validatorIndex(), syncCommitteeIndices, untilEpoch.decrement());
-      syncCommitteeSubscriptionManager.recordDuty(
-          computeSyncCommitteeDutyStartSlot(syncCommitteeUtil, untilEpoch), unsubscribeSlot);
+      syncCommitteeSubscriptionManager.recordDuty(subscription.validatorIndex(), unsubscribeSlot);
       syncCommitteeUtil
           .getSyncSubcommittees(syncCommitteeIndices)
           .forEach(index -> syncCommitteeSubscriptionManager.subscribe(index, unsubscribeSlot));
     }
-  }
-
-  private UInt64 computeSyncCommitteeDutyStartSlot(
-      final SyncCommitteeUtil syncCommitteeUtil, final UInt64 untilEpoch) {
-    final UInt64 lastEpoch = untilEpoch.decrement();
-    if (!syncCommitteeUtil
-        .computeFirstEpochOfNextSyncCommitteePeriod(lastEpoch)
-        .equals(untilEpoch)) {
-      return UInt64.ZERO;
-    }
-    return spec.computeStartSlotAtEpoch(
-        syncCommitteeUtil.computeFirstEpochOfCurrentSyncCommitteePeriod(lastEpoch));
   }
 
   @Override

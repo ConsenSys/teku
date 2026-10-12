@@ -74,36 +74,28 @@ public class SyncCommitteeSubscriptionManagerTest {
   }
 
   @Test
-  void hasDutyActiveAt_shouldOnlyCountSlotsWithinDuty() {
-    manager.recordDuty(UInt64.ZERO, UInt64.valueOf(16));
-    manager.recordDuty(UInt64.valueOf(16), UInt64.valueOf(32));
+  void getValidatorsWithDuty_shouldReturnRecordedValidators() {
+    manager.recordDuty(1, UInt64.valueOf(16));
+    manager.recordDuty(2, UInt64.valueOf(32));
 
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10))).isTrue();
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(16))).isTrue();
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(31))).isTrue();
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(32))).isFalse();
+    assertThat(manager.getValidatorsWithDuty()).containsExactlyInAnyOrder(1, 2);
   }
 
   @Test
-  void hasDutyActiveAt_shouldIgnoreDutiesNotStartedYet() {
-    manager.recordDuty(UInt64.valueOf(16), UInt64.valueOf(32));
-
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10))).isFalse();
-  }
-
-  @Test
-  void hasDutyActiveAt_shouldCountDutyEndingInLaterPeriod() {
-    manager.recordDuty(UInt64.valueOf(16), UInt64.valueOf(48));
-    manager.recordDuty(UInt64.ZERO, UInt64.valueOf(48));
-
-    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10))).isTrue();
-  }
-
-  @Test
-  void hasDutyActiveAt_shouldForgetEndedDuties() {
-    manager.recordDuty(UInt64.ZERO, UInt64.valueOf(16));
+  void getValidatorsWithDuty_shouldForgetEndedDuties() {
+    manager.recordDuty(1, UInt64.valueOf(16));
+    manager.recordDuty(2, UInt64.valueOf(32));
     manager.onSlot(UInt64.valueOf(16));
 
-    assertThat(manager.hasDutyActiveAt(UInt64.ZERO)).isFalse();
+    assertThat(manager.getValidatorsWithDuty()).containsExactly(2);
+  }
+
+  @Test
+  void getValidatorsWithDuty_shouldKeepLatestEndSlot() {
+    manager.recordDuty(1, UInt64.valueOf(32));
+    manager.recordDuty(1, UInt64.valueOf(16));
+    manager.onSlot(UInt64.valueOf(16));
+
+    assertThat(manager.getValidatorsWithDuty()).containsExactly(1);
   }
 }
