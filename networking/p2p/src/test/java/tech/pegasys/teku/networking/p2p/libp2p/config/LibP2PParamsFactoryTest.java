@@ -74,6 +74,7 @@ public class LibP2PParamsFactoryTest {
             GossipConfig.builder().build(), spec.getNetworkingConfig());
 
     assertThat(gossipParams.getMaxSubscriptionsPerRpc())
-        .isEqualTo(LibP2PParamsFactory.MAX_SUBSCRIPTIONS_PER_MESSAGE);
+        .isEqualTo(LibP2PParamsFactory.MAX_OUTBOUND_SUBSCRIPTIONS_PER_RPC)
+        .isLessThanOrEqualTo(LibP2PParamsFactory.MAX_INBOUND_SUBSCRIPTIONS_PER_RPC);
   }
 }

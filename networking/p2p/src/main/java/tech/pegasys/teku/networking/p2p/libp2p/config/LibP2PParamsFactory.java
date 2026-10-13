@@ -33,7 +33,14 @@ import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 
 public class LibP2PParamsFactory {
 
-  public static final int MAX_SUBSCRIPTIONS_PER_MESSAGE = 200;
+  // A peer announces every topic it is subscribed to in one RPC when a stream opens, and the
+  // whole RPC is dropped when it carries more entries than this. A node subscribed to all
+  // subnets has ~220 topics per fork and announces two forks worth of topics around a fork, so
+  // 500 is enough. Enforced inbound via MaxCountTopicSubscriptionFilter.
+  public static final int MAX_INBOUND_SUBSCRIPTIONS_PER_RPC = 500;
+  // Our own announcements are split into RPCs of at most this many subscriptions. Kept at the
+  // inbound limit of earlier Teku releases so they still accept our announcements.
+  public static final int MAX_OUTBOUND_SUBSCRIPTIONS_PER_RPC = 200;
   private static final int MAX_PUBLISHED_MESSAGES = 1000;
   private static final int MAX_TOPICS_PER_PUBLISHED_MESSAGE = 1;
   private static final int MAX_IHAVE_MESSAGE_IDS = 5000;
@@ -92,9 +99,7 @@ public class LibP2PParamsFactory {
         .maxGossipMessageSize(maxMessageSize(maxPayloadSize))
         .maxPublishedMessages(MAX_PUBLISHED_MESSAGES)
         .maxTopicsPerPublishedMessage(MAX_TOPICS_PER_PUBLISHED_MESSAGE)
-        // Keeps our outbound subscription batches within what our own
-        // MaxCountTopicSubscriptionFilter accepts inbound.
-        .maxSubscriptionsPerRpc(MAX_SUBSCRIPTIONS_PER_MESSAGE)
+        .maxSubscriptionsPerRpc(MAX_OUTBOUND_SUBSCRIPTIONS_PER_RPC)
         .maxPeersSentInPruneMsg(0)
         .maxPeersAcceptedInPruneMsg(0)
         .maxIHaveLength(MAX_IHAVE_MESSAGE_IDS)
