@@ -15,7 +15,7 @@ package tech.pegasys.teku.networking.p2p.libp2p.gossip;
 
 import static com.google.common.base.Preconditions.checkState;
 import static tech.pegasys.teku.networking.p2p.libp2p.LibP2PNetworkBuilder.DEFAULT_RECORD_MESSAGE_ARRIVAL;
-import static tech.pegasys.teku.networking.p2p.libp2p.config.LibP2PParamsFactory.MAX_SUBSCRIPTIONS_PER_MESSAGE;
+import static tech.pegasys.teku.networking.p2p.libp2p.config.LibP2PParamsFactory.MAX_INBOUND_SUBSCRIPTIONS_PER_RPC;
 import static tech.pegasys.teku.networking.p2p.libp2p.gossip.LibP2PGossipNetwork.NULL_SEQNO_GENERATOR;
 import static tech.pegasys.teku.networking.p2p.libp2p.gossip.LibP2PGossipNetwork.STRICT_FIELDS_VALIDATOR;
 
@@ -114,7 +114,7 @@ public class LibP2PGossipNetworkBuilder {
 
     final TopicSubscriptionFilter subscriptionFilter =
         new MaxCountTopicSubscriptionFilter(
-            MAX_SUBSCRIPTIONS_PER_MESSAGE,
+            MAX_INBOUND_SUBSCRIPTIONS_PER_RPC,
             MAX_SUBSCRIBED_TOPICS,
             gossipTopicFilter::isRelevantTopic);
 
