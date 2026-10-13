@@ -210,6 +210,38 @@ class Eth2PeerSelectionStrategyTest {
   }
 
   @Test
+  void selectPeersToConnect_shouldGiveEachIdentityAtMostOneSlot() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(2, 2, 0);
+    final DiscoveryPeer anotherRecordForPeer1 = createDiscoveryPeerWithPort(PEER1, 9999);
+
+    // Two records for one identity yield one address, so the second slot goes to PEER2
+    assertThat(
+            strategy.selectPeersToConnect(
+                network,
+                peerPools,
+                () -> List.of(DISCOVERY_PEER1, anotherRecordForPeer1, DISCOVERY_PEER2)))
+        .containsExactly(PEER1, PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldGiveEachIdentityAtMostOneSlotAcrossRandomAndScoreStages() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(2, 2, 1);
+    final DiscoveryPeer anotherRecordForPeer1 = createDiscoveryPeerWithPort(PEER1, 9999);
+    withShuffleOrder(DISCOVERY_PEER1, anotherRecordForPeer1, DISCOVERY_PEER2);
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network,
+                peerPools,
+                () -> List.of(DISCOVERY_PEER1, anotherRecordForPeer1, DISCOVERY_PEER2)))
+        .containsExactly(PEER1, PEER2);
+    assertThat(peerPools.getPeerConnectionType(PEER1.getId()))
+        .isEqualTo(PeerConnectionType.RANDOMLY_SELECTED);
+    assertThat(peerPools.getPeerConnectionType(PEER2.getId()))
+        .isEqualTo(PeerConnectionType.SCORE_BASED);
+  }
+
+  @Test
   void selectPeersToConnect_shouldConnectToRandomPeers() {
     final Eth2PeerSelectionStrategy strategy = createStrategy(0, 4, 2);
     withShuffleOrder(DISCOVERY_PEER3, DISCOVERY_PEER1, DISCOVERY_PEER2);
@@ -496,6 +528,21 @@ class Eth2PeerSelectionStrategyTest {
 
   private static DiscoveryPeer createDiscoveryPeer(final PeerAddress peer, final int... attnets) {
     return createDiscoveryPeer(peer.getId().toBytes(), attnets);
+  }
+
+  /** A second discovery record for an identity that is already a candidate, differing in port. */
+  private static DiscoveryPeer createDiscoveryPeerWithPort(final PeerAddress peer, final int port) {
+    final Bytes peerId = peer.getId().toBytes();
+    return new DiscoveryPeer(
+        peerId,
+        peerId,
+        Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), port)),
+        Optional.empty(),
+        ENR_FORK_ID,
+        SCHEMA_DEFINITIONS.getAttnetsENRFieldSchema().getDefault(),
+        SCHEMA_DEFINITIONS.getSyncnetsENRFieldSchema().getDefault(),
+        Optional.empty(),
+        Optional.empty());
   }
 
   private static DiscoveryPeer createDiscoveryPeer(final Bytes peerId, final int... attnets) {
