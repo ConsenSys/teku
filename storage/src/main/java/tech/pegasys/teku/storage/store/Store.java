@@ -826,8 +826,7 @@ class Store extends CacheableStore {
 
   @Override
   public SafeFuture<Optional<BeaconState>> retrieveCheckpointState(final Checkpoint checkpoint) {
-    return checkpointStates.perform(
-        new StateAtSlotTask(spec, checkpoint.toSlotAndBlockRoot(spec), this::retrieveBlockState));
+    return retrieveBlockState(checkpoint.toSlotAndBlockRoot(spec));
   }
 
   @Override

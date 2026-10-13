@@ -470,8 +470,7 @@ class StoreTest extends AbstractStoreTest {
   }
 
   @Test
-  public void retrieveBlockState_shouldUseStateOnlyAnchorOnlyForSlotTargetedRetrieval()
-      throws Exception {
+  public void shouldUseStateOnlyAnchorForSlotTargetedAndCheckpointRetrieval() throws Exception {
     chainBuilder.generateGenesis();
     final UInt64 checkpointSlot = spec.computeStartSlotAtEpoch(UInt64.ONE);
     final SignedBlockAndState anchorBlock =
@@ -489,6 +488,8 @@ class StoreTest extends AbstractStoreTest {
             .earliestBlobSidecarSlotProvider(EarliestBlobSidecarSlotProvider.NOOP)
             .build();
 
+    assertThat(store.retrieveCheckpointState(anchor.getCheckpoint()))
+        .isCompletedWithValue(Optional.of(anchorState));
     assertThat(store.retrieveBlockState(anchor.getRoot())).isCompletedWithValue(Optional.empty());
     assertThat(store.retrieveBlockState(new SlotAndBlockRoot(checkpointSlot, anchor.getRoot())))
         .isCompletedWithValue(Optional.of(anchorState));
