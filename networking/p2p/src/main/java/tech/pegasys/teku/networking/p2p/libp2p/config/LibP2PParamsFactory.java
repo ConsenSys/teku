@@ -34,9 +34,11 @@ import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 public class LibP2PParamsFactory {
 
   // A peer announces every topic it is subscribed to in one RPC when a stream opens, and the
-  // whole RPC is dropped when it carries more entries than this. A node subscribed to all
-  // subnets has ~220 topics per fork and announces two forks worth of topics around a fork, so
-  // 500 is enough. Enforced inbound via MaxCountTopicSubscriptionFilter.
+  // whole RPC is dropped when it carries more entries than this. On mainnet a node subscribed to
+  // all subnets has ~225 topics per fork and announces two forks worth of topics around a fork.
+  // Three overlapping forks (devnets with forks at consecutive epochs) do not fit; raise this
+  // if that matters, nothing else depends on the value. Enforced inbound via
+  // MaxCountTopicSubscriptionFilter.
   public static final int MAX_INBOUND_SUBSCRIPTIONS_PER_RPC = 500;
   // Our own announcements are split into RPCs of at most this many subscriptions. Kept at the
   // inbound limit of earlier Teku releases so they still accept our announcements.

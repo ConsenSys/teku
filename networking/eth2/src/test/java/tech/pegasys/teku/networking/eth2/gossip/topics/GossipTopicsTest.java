@@ -62,7 +62,9 @@ public class GossipTopicsTest {
   public void subscriptionLimitsAreLargeEnoughForAllTopics() {
     final SpecMilestone latestMilestone = SpecMilestone.getHighestMilestone();
     final Spec spec = TestSpecFactory.createMainnet(latestMilestone);
-    final P2PConfig p2pConfig = P2PConfig.builder().specProvider(spec).build();
+    // every optional topic enabled, so the count is the real worst case
+    final P2PConfig p2pConfig =
+        P2PConfig.builder().specProvider(spec).executionProofTopicEnabled(true).build();
 
     final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(32, spec);
     storageSystem.chainUpdater().initializeGenesis();
