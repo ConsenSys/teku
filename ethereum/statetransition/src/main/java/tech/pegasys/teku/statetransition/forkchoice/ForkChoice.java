@@ -74,6 +74,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.VoteUpdater;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
@@ -83,6 +84,7 @@ import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.logic.common.execution.ExecutionPayloadVerificationException;
+import tech.pegasys.teku.spec.logic.common.execution.ExecutionPayloadVerifier;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityChecker;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
@@ -276,17 +278,37 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
     final Bytes32 blockRoot = signedEnvelope.getBeaconBlockRoot();
-    final SafeFuture<Optional<BeaconState>> state =
+    final Optional<AnchorPoint> stateOnlyAnchor =
         recentChainData
-            .retrieveStateAndBlockSummary(blockRoot)
-            .thenApply(result -> result.map(StateAndBlockSummary::getState));
-    return state.thenCompose(
-        maybeState ->
-            onExecutionPayloadEnvelope(
-                signedEnvelope,
-                maybeState,
-                executionLayer,
-                receivedExecutionPayloadEventsChannelPublisher));
+            .getLatestFinalized()
+            .filter(anchor -> anchor.getRoot().equals(blockRoot))
+            .filter(anchor -> anchor.getSignedBeaconBlock().isEmpty())
+            .filter(anchor -> anchor.getState().toVersionGloas().isPresent());
+    if (stateOnlyAnchor.isPresent()) {
+      return verifyAndImportExecutionPayloadEnvelope(
+          signedEnvelope,
+          stateOnlyAnchor.get().getState(),
+          stateOnlyAnchor,
+          executionLayer,
+          receivedExecutionPayloadEventsChannelPublisher);
+    }
+    return recentChainData
+        .retrieveBlockAndState(blockRoot)
+        .thenCompose(
+            maybeBlockAndState ->
+                maybeBlockAndState
+                    .map(
+                        blockAndState ->
+                            verifyAndImportExecutionPayloadEnvelope(
+                                signedEnvelope,
+                                blockAndState.getState(),
+                                Optional.empty(),
+                                executionLayer,
+                                receivedExecutionPayloadEventsChannelPublisher))
+                    .orElseGet(
+                        () ->
+                            SafeFuture.completedFuture(
+                                ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT)));
   }
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
@@ -660,23 +682,13 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
             });
   }
 
-  /**
-   * Import an execution payload envelope using its block's post-state, or the checkpoint state when
-   * recovering the finalized anchor's payload.
-   */
-  private SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
+  private SafeFuture<ExecutionPayloadImportResult> verifyAndImportExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
-      final Optional<BeaconState> maybeState,
+      final BeaconState state,
+      final Optional<AnchorPoint> stateOnlyAnchor,
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
-    if (maybeState.isEmpty()) {
-      return SafeFuture.completedFuture(
-          ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
-    }
-
-    final BeaconState state = maybeState.get();
-
     final ForkChoiceUtil forkChoiceUtil = spec.atSlot(signedEnvelope.getSlot()).getForkChoiceUtil();
 
     final AvailabilityChecker<?> availabilityChecker =
@@ -689,10 +701,20 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     // signature verification the same way every other verification path does.
     final BLSSignatureVerifier envelopeSignatureVerifier =
         spec.atSlot(signedEnvelope.getSlot()).getConfig().getBLSSignatureVerifier();
+    final ExecutionPayloadVerifier verifier =
+        spec.getExecutionPayloadVerifier(signedEnvelope.getSlot());
     try {
-      spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
-          .verifyExecutionPayloadEnvelope(
-              signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      if (stateOnlyAnchor.isPresent()) {
+        // The anchor state may be advanced past its block; verify at the block's slot.
+        verifier.verifyCheckpointAnchorExecutionPayloadEnvelope(
+            signedEnvelope,
+            stateOnlyAnchor.get(),
+            envelopeSignatureVerifier,
+            Optional.of(payloadExecutor));
+      } else {
+        verifier.verifyExecutionPayloadEnvelope(
+            signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      }
     } catch (final ExecutionPayloadVerificationException ex) {
       final ExecutionPayloadImportResult result =
           ExecutionPayloadImportResult.failedVerification(ex);
