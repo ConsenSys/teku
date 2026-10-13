@@ -16,7 +16,9 @@ package tech.pegasys.teku.statetransition.forkchoice;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +29,8 @@ import java.util.concurrent.ExecutionException;
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -34,6 +38,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
@@ -58,6 +63,9 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void setup() {
     when(block.getMessage()).thenReturn(beaconBlock);
     when(block.getSlot()).thenReturn(UInt64.ONE);
+    final BeaconBlockBody body = mock(BeaconBlockBody.class);
+    when(beaconBlock.getBody()).thenReturn(body);
+    when(body.getOptionalBlobKzgCommitments()).thenReturn(Optional.empty());
     checker = new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
     when(spec.getSlotDurationMillis(any())).thenReturn(10_000);
     when(recentChainData.getCurrentSlot()).thenReturn(Optional.empty());
@@ -66,11 +74,43 @@ class DataColumnSidecarAvailabilityCheckerTest {
   @Test
   void shouldReturnNotRequiredWhenBeforeFulu() throws ExecutionException, InterruptedException {
 
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.NOT_REQUIRED_BEFORE_FULU);
     assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
     assertThat(checker.getAvailabilityCheckResult().get())
         .isEqualTo(DataAndValidationResult.notRequired());
+  }
+
+  @Test
+  void shouldReadEnvelopeCommitmentsAtConstruction() {
+    final DataStructureUtil data = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final BeaconState state = spy(data.randomBeaconState(UInt64.valueOf(8)));
+    final SignedExecutionPayloadEnvelope envelope = data.randomSignedExecutionPayloadEnvelope(8);
+    new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, state, envelope);
+
+    verify(state).toVersionGloas();
+    verifyNoInteractions(das);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void shouldEvaluateBlockEligibilityAtInitiation(final boolean hasBlobs) {
+    final DataStructureUtil data = new DataStructureUtil(TestSpecFactory.createMinimalFulu());
+    final SignedBeaconBlock samplingBlock =
+        data.randomSignedBeaconBlockWithCommitments(UInt64.ONE, hasBlobs ? 1 : 0);
+    when(das.checkSamplingEligibility(UInt64.ONE, hasBlobs))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
+    final DataColumnSidecarAvailabilityChecker samplingChecker =
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, samplingBlock);
+    verifyNoInteractions(das);
+    when(das.checkSamplingEligibility(UInt64.ONE, hasBlobs))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH);
+
+    samplingChecker.initiateDataAvailabilityCheck();
+
+    verify(das).checkSamplingEligibility(UInt64.ONE, hasBlobs);
+    assertThat(samplingChecker.getAvailabilityCheckResult())
+        .isCompletedWithValue(DataAndValidationResult.notRequired());
   }
 
   @Test
@@ -155,7 +195,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   @Test
   void shouldReturnNotRequiredWhenOldEpoch() throws ExecutionException, InterruptedException {
 
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH);
     assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
     assertThat(checker.getAvailabilityCheckResult().get())
@@ -166,7 +206,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void shouldReturnNotRequiredWhenNoBlobsInTheBlock()
       throws ExecutionException, InterruptedException {
 
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS);
     assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
     assertThat(checker.getAvailabilityCheckResult().get())
@@ -177,7 +217,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void shouldReturnInvalidWhenDASSamplerReturnError()
       throws ExecutionException, InterruptedException {
     final RuntimeException exception = new RuntimeException("Error during DAS check");
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(das.checkDataAvailability(any(), any())).thenReturn(SafeFuture.failedFuture(exception));
     assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
@@ -189,7 +229,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void shouldReturnValidWhenDASSamplerReturnListWithIndices()
       throws ExecutionException, InterruptedException {
     List<UInt64> listOfIndices = Lists.newArrayList(UInt64.valueOf(1), UInt64.valueOf(2));
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(das.checkDataAvailability(any(), any()))
         .thenReturn(SafeFuture.completedFuture(listOfIndices));
@@ -202,7 +242,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void shouldReturnNotAvailableOnTimeoutWhenBlockIsWithinDataAvailabilityWindow()
       throws ExecutionException, InterruptedException {
     final UpdatableStore store = mock(UpdatableStore.class);
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(das.checkDataAvailability(any(), any())).thenReturn(new SafeFuture<>());
     when(recentChainData.getStore()).thenReturn(store);
@@ -223,7 +263,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void shouldReturnNotRequiredOnTimeoutWhenBlockIsOutsideDataAvailabilityWindow()
       throws ExecutionException, InterruptedException {
     final UpdatableStore store = mock(UpdatableStore.class);
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(das.checkDataAvailability(any(), any())).thenReturn(new SafeFuture<>());
     when(recentChainData.getStore()).thenReturn(store);
@@ -243,7 +283,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
   void shouldNotPoisonSharedTrackerFutureOnTimeout()
       throws ExecutionException, InterruptedException {
     final UpdatableStore store = mock(UpdatableStore.class);
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     final SafeFuture<List<UInt64>> sharedTrackerFuture = new SafeFuture<>();
     when(das.checkDataAvailability(any(), any())).thenReturn(sharedTrackerFuture);
@@ -273,7 +313,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
     when(spec.getSlotsPerEpoch(currentSlot)).thenReturn(32);
     when(spec.getSlotDurationMillis(UInt64.ONE)).thenReturn(1);
     when(spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(store, UInt64.ONE)).thenReturn(true);
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(das.checkDataAvailability(UInt64.ONE, block.getRoot())).thenReturn(new SafeFuture<>());
 
@@ -291,7 +331,7 @@ class DataColumnSidecarAvailabilityCheckerTest {
     when(recentChainData.getCurrentSlot()).thenReturn(Optional.of(UInt64.valueOf(34)));
     when(spec.getSlotsPerEpoch(UInt64.valueOf(34))).thenReturn(32);
     when(spec.getSlotDurationMillis(UInt64.ONE)).thenReturn(100);
-    when(das.checkSamplingEligibility(block.getMessage()))
+    when(das.checkSamplingEligibility(UInt64.ONE, false))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(das.checkDataAvailability(UInt64.ONE, block.getRoot()))
         .thenReturn(

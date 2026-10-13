@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -33,7 +32,6 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Be
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityChecker;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
-import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler.SamplingEligibilityStatus;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker<UInt64> {
@@ -45,7 +43,7 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
   private final RecentChainData recentChainData;
   private final UInt64 slot;
   private final Bytes32 blockRoot;
-  private final Supplier<SamplingEligibilityStatus> samplingEligibility;
+  private final boolean hasBlobs;
   private final Optional<SignedExecutionPayloadEnvelope> signedEnvelope;
   private static final long BATCH_SYNC_TIMEOUT_BOOST = 5L;
 
@@ -54,14 +52,14 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
       final Spec spec,
       final RecentChainData recentChainData,
       final SignedBeaconBlock block) {
-    this.dataAvailabilitySampler = dataAvailabilitySampler;
-    this.spec = spec;
-    this.recentChainData = recentChainData;
-    this.slot = block.getSlot();
-    this.blockRoot = block.getRoot();
-    this.samplingEligibility =
-        () -> dataAvailabilitySampler.checkSamplingEligibility(block.getMessage());
-    this.signedEnvelope = Optional.empty();
+    this(
+        dataAvailabilitySampler,
+        spec,
+        recentChainData,
+        block.getSlot(),
+        block.getRoot(),
+        DataAvailabilitySampler.hasBlobs(block.getMessage()),
+        Optional.empty());
   }
 
   public DataColumnSidecarAvailabilityChecker(
@@ -70,26 +68,40 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
       final RecentChainData recentChainData,
       final BeaconState state,
       final SignedExecutionPayloadEnvelope signedEnvelope) {
+    this(
+        dataAvailabilitySampler,
+        spec,
+        recentChainData,
+        signedEnvelope.getSlot(),
+        signedEnvelope.getBeaconBlockRoot(),
+        !BeaconStateGloas.required(state)
+            .getLatestExecutionPayloadBid()
+            .getBlobKzgCommitments()
+            .isEmpty(),
+        Optional.of(signedEnvelope));
+  }
+
+  private DataColumnSidecarAvailabilityChecker(
+      final DataAvailabilitySampler dataAvailabilitySampler,
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final UInt64 slot,
+      final Bytes32 blockRoot,
+      final boolean hasBlobs,
+      final Optional<SignedExecutionPayloadEnvelope> signedEnvelope) {
     this.dataAvailabilitySampler = dataAvailabilitySampler;
     this.spec = spec;
     this.recentChainData = recentChainData;
-    this.slot = signedEnvelope.getSlot();
-    this.blockRoot = signedEnvelope.getBeaconBlockRoot();
-    this.signedEnvelope = Optional.of(signedEnvelope);
-    this.samplingEligibility =
-        () ->
-            dataAvailabilitySampler.checkSamplingEligibility(
-                slot,
-                !BeaconStateGloas.required(state)
-                    .getLatestExecutionPayloadBid()
-                    .getBlobKzgCommitments()
-                    .isEmpty());
+    this.slot = slot;
+    this.blockRoot = blockRoot;
+    this.hasBlobs = hasBlobs;
+    this.signedEnvelope = signedEnvelope;
   }
 
   @Override
   public boolean initiateDataAvailabilityCheck() {
     LOG.debug("Starting data availability check for slot {}", slot);
-    switch (samplingEligibility.get()) {
+    switch (dataAvailabilitySampler.checkSamplingEligibility(slot, hasBlobs)) {
       case NOT_REQUIRED_BEFORE_FULU -> {
         validationResult.complete(DataAndValidationResult.notRequired());
         LOG.debug("Availability check for slot {} NOT_REQUIRED, Fulu not started", slot);

@@ -93,10 +93,12 @@ public interface DataAvailabilitySampler
    */
   void flush();
 
+  static boolean hasBlobs(final BeaconBlock block) {
+    return !block.getBody().getOptionalBlobKzgCommitments().map(SszList::isEmpty).orElse(true);
+  }
+
   default SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
-    return checkSamplingEligibility(
-        block.getSlot(),
-        !block.getBody().getOptionalBlobKzgCommitments().map(SszList::isEmpty).orElse(true));
+    return checkSamplingEligibility(block.getSlot(), hasBlobs(block));
   }
 
   SamplingEligibilityStatus checkSamplingEligibility(UInt64 slot, boolean hasBlobs);

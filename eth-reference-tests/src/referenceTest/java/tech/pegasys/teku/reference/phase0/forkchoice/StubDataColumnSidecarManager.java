@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -38,7 +37,6 @@ import tech.pegasys.teku.spec.logic.common.statetransition.availability.Availabi
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
 import tech.pegasys.teku.statetransition.datacolumns.BlobKzgCommitmentsProvider;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
-import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler.SamplingEligibilityStatus;
 import tech.pegasys.teku.statetransition.validation.DataColumnSidecarGossipValidator;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -74,9 +72,7 @@ public class StubDataColumnSidecarManager implements AvailabilityCheckerFactory<
   @Override
   public AvailabilityChecker<UInt64> createAvailabilityChecker(final SignedBeaconBlock block) {
     return createAvailabilityChecker(
-        block.getSlot(),
-        block.getMessage().getBody().getOptionalBlobKzgCommitments(),
-        () -> dataAvailabilitySampler.checkSamplingEligibility(block.getMessage()));
+        block.getSlot(), block.getMessage().getBody().getOptionalBlobKzgCommitments());
   }
 
   @Override
@@ -84,24 +80,18 @@ public class StubDataColumnSidecarManager implements AvailabilityCheckerFactory<
       final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
     final SszList<SszKZGCommitment> commitments =
         BeaconStateGloas.required(state).getLatestExecutionPayloadBid().getBlobKzgCommitments();
-    return createAvailabilityChecker(
-        signedEnvelope.getSlot(),
-        Optional.of(commitments),
-        () ->
-            dataAvailabilitySampler.checkSamplingEligibility(
-                signedEnvelope.getSlot(), !commitments.isEmpty()));
+    return createAvailabilityChecker(signedEnvelope.getSlot(), Optional.of(commitments));
   }
 
   private AvailabilityChecker<UInt64> createAvailabilityChecker(
-      final UInt64 blockSlot,
-      final Optional<SszList<SszKZGCommitment>> optionalKzgCommitments,
-      final Supplier<SamplingEligibilityStatus> samplingEligibility) {
+      final UInt64 blockSlot, final Optional<SszList<SszKZGCommitment>> optionalKzgCommitments) {
+    final boolean hasBlobs = !optionalKzgCommitments.map(SszList::isEmpty).orElse(true);
     final SafeFuture<DataAndValidationResult<UInt64>> validationResult = new SafeFuture<>();
     return new AvailabilityChecker<UInt64>() {
 
       @Override
       public boolean initiateDataAvailabilityCheck() {
-        switch (samplingEligibility.get()) {
+        switch (dataAvailabilitySampler.checkSamplingEligibility(blockSlot, hasBlobs)) {
           case NOT_REQUIRED_BEFORE_FULU -> {
             validationResult.complete(DataAndValidationResult.notRequired());
             LOG.debug("Availability check for slot {} NOT_REQUIRED, Fulu not started", blockSlot);
