@@ -289,17 +289,21 @@ public abstract class AbstractSszProgressiveListSchema<
   private int sszSerializeFixed(
       final TreeNode dataNode, final SszWriter writer, final int elementsCount) {
     if (elementSchema instanceof AbstractSszPrimitiveSchema) {
-      // Primitive packing: multiple values per 32-byte leaf chunk
+      // Primitive packing: multiple values per 32-byte leaf chunk. Chunks are laid out in order
+      // across the spine levels (level 0, then level 1, ...), so a single in-order traversal from
+      // the first to the last chunk visits every data leaf exactly once without walking the tree
+      // from the root per chunk.
       final int chunksCount = getChunks(elementsCount);
-      int bytesCnt = 0;
-      for (int c = 0; c < chunksCount; c++) {
-        final long gIdx = ProgressiveTreeUtil.getElementGeneralizedIndex(c);
-        final LeafNode leafNode = (LeafNode) dataNode.get(gIdx);
-        final Bytes data = leafNode.getData();
-        writer.write(data);
-        bytesCnt += data.size();
-      }
-      return bytesCnt;
+      final int[] bytesCnt = new int[1];
+      TreeUtil.iterateLeavesData(
+          dataNode,
+          ProgressiveTreeUtil.getElementGeneralizedIndex(0),
+          ProgressiveTreeUtil.getElementGeneralizedIndex(chunksCount - 1),
+          leafData -> {
+            writer.write(leafData);
+            bytesCnt[0] += leafData.size();
+          });
+      return bytesCnt[0];
     } else {
       // Fixed-size composite elements: one per chunk
       int bytesCnt = 0;
