@@ -437,6 +437,14 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
       final ForkChoiceState forkChoiceState, final UInt64 requestedBlockProductionSlot) {
     if (hasPayloadAttributesForPinnedBlockProduction(
         forkChoiceUpdateData, forkChoiceState, requestedBlockProductionSlot)) {
+      if (forkChoiceUpdateData.getExecutionPayloadContext().isCompletedExceptionally()) {
+        // The previous forkChoiceUpdated for these attributes failed (e.g. EL error or timeout).
+        // Reusing it would hand the same failure to this request, so send them again instead.
+        LOG.debug(
+            "Previous forkChoiceUpdated for block production at slot {} failed, resending",
+            requestedBlockProductionSlot);
+        return forkChoiceUpdateData.forResend();
+      }
       return forkChoiceUpdateData;
     }
 
