@@ -231,19 +231,20 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
 
   @VisibleForTesting
   void verifyTasksIndividually(final List<SignatureTask> tasks) {
-    for (final SignatureTask task : tasks) {
-      if (task.result.isDone()) {
-        // Already verified before the failure; skip it so we don't repeat the expensive
-        // verification or overwrite its result.
-        continue;
-      }
-      try {
-        final boolean taskIsValid =
-            BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
-        task.completeAsync(taskIsValid);
-      } catch (final RuntimeException ex) {
-        // Isolate the failure to this task so the rest of the batch still completes.
-        task.completeExceptionallyAsync(ex);
+    // Urgent tasks are settled first here too, so that the guarantee holds on every failure path
+    for (final boolean urgentPass : new boolean[] {true, false}) {
+      for (final SignatureTask task : tasks) {
+        if (task.urgent != urgentPass || task.result.isDone()) {
+          // Not this pass, or already verified before the failure; skip it so we don't repeat the
+          // expensive verification or overwrite its result.
+          continue;
+        }
+        try {
+          task.completeAsync(verifyIndividually(task));
+        } catch (final RuntimeException ex) {
+          // Isolate the failure to this task so the rest of the batch still completes.
+          task.completeExceptionallyAsync(ex);
+        }
       }
     }
   }
@@ -324,20 +325,43 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     } else if (tasks.size() == 1) {
       // We only had 1 signature, so it must be invalid
       tasks.getFirst().completeAsync(false);
-    } else if (tasks.size() >= minBatchSizeToSplit) {
-      // Split up tasks and try to verify in smaller batches
-      final List<List<SignatureTask>> splitTasks = splitTasks(tasks);
-      for (List<SignatureTask> splitTask : splitTasks) {
-        batchVerifySignatures(splitTask);
-      }
     } else {
-      // Validate each signature individually
-      for (SignatureTask task : tasks) {
-        final boolean taskIsValid =
-            BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
-        task.completeAsync(taskIsValid);
+      // Urgent tasks must not wait behind the subdivision of a failed batch, which can take
+      // several rounds when the batch holds invalid signatures: settle them first on their own
+      final List<SignatureTask> remainingTasks = verifyUrgentTasksIndividually(tasks);
+      if (remainingTasks.size() >= minBatchSizeToSplit) {
+        // Split up tasks and try to verify in smaller batches
+        final List<List<SignatureTask>> splitTasks = splitTasks(remainingTasks);
+        for (List<SignatureTask> splitTask : splitTasks) {
+          batchVerifySignatures(splitTask);
+        }
+      } else {
+        // Validate each signature individually
+        for (SignatureTask task : remainingTasks) {
+          task.completeAsync(verifyIndividually(task));
+        }
       }
     }
+  }
+
+  /** Verifies and completes the urgent tasks of a failed batch, returning the other tasks. */
+  private List<SignatureTask> verifyUrgentTasksIndividually(final List<SignatureTask> tasks) {
+    if (tasks.stream().noneMatch(task -> task.urgent)) {
+      return tasks;
+    }
+    final List<SignatureTask> remainingTasks = new ArrayList<>(tasks.size());
+    for (final SignatureTask task : tasks) {
+      if (task.urgent) {
+        task.completeAsync(verifyIndividually(task));
+      } else {
+        remainingTasks.add(task);
+      }
+    }
+    return remainingTasks;
+  }
+
+  private static boolean verifyIndividually(final SignatureTask task) {
+    return BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
   }
 
   @VisibleForTesting

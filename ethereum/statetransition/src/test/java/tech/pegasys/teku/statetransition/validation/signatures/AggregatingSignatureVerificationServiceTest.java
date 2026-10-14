@@ -556,6 +556,61 @@ public class AggregatingSignatureVerificationServiceTest {
         .isEqualTo(1);
   }
 
+  @Test
+  public void batchVerify_completesUrgentTaskBeforeRetryingTheRestOfAFailedBatch() {
+    startService();
+    // An invalid-heavy first half: enough tasks that the failed batch gets split rather than
+    // verified individually straight away (minBatchSizeToSplit is 5)
+    final List<SafeFuture<Boolean>> invalidFutures = new ArrayList<>();
+    for (int i = 0; i < 6; i++) {
+      invalidFutures.add(executeInvalidVerify(i, i));
+    }
+    // A valid urgent task that landed last, i.e. in the second half of the batch
+    final SafeFuture<Boolean> urgentFuture = executeUrgentValidVerify(10, 10);
+    final List<SignatureTask> batch = getPendingTasks();
+    assertThat(batch).hasSize(7);
+
+    service.batchVerifySignatures(batch);
+
+    // The urgent task is the first result handed to the completion runner, before the
+    // subdivision of the failed batch retries anything else
+    completionRunner.executeQueuedActions(1);
+    assertThat(urgentFuture).isCompletedWithValue(true);
+    invalidFutures.forEach(future -> assertThat(future).isNotDone());
+
+    completionRunner.executeQueuedActions();
+    invalidFutures.forEach(future -> assertThat(future).isCompletedWithValue(false));
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void verifyTasksIndividually_completesUrgentTasksBeforeTheOthers() {
+    startService();
+
+    // Mismatched key / message / signature list sizes make verification throw for this task, so
+    // it is the kind of task that sends a whole batch down the exception fallback.
+    final SafeFuture<Boolean> malformed =
+        service.verify(
+            List.of(List.of(KEYS.get(0).getPublicKey())), List.of(Bytes.of(0)), List.of());
+    final SafeFuture<Boolean> networkValid = executeValidVerify(1, 1);
+    final SafeFuture<Boolean> urgentValid = executeUrgentValidVerify(2, 2);
+    final List<SignatureTask> tasks = getPendingTasks();
+    assertThat(tasks).hasSize(3);
+
+    service.verifyTasksIndividually(tasks);
+
+    // The urgent task is the first result handed to the completion runner even though it was
+    // submitted last, and the malformed task still fails in isolation.
+    completionRunner.executeQueuedActions(1);
+    assertThat(urgentValid).isCompletedWithValue(true);
+    assertThat(networkValid).isNotDone();
+    assertThat(malformed).isNotDone();
+
+    completionRunner.executeQueuedActions();
+    assertThat(networkValid).isCompletedWithValue(true);
+    assertThat(malformed).isCompletedExceptionally();
+  }
+
   private SafeFuture<Boolean> executeUrgentValidVerify(final int keypairIndex, final int data) {
     return executeUrgentVerify(keypairIndex, data, true);
   }
