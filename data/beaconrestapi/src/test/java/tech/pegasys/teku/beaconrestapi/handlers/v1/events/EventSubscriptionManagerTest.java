@@ -16,6 +16,7 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.events;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import io.javalin.http.Context;
@@ -51,6 +52,7 @@ import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -67,6 +69,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedCo
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceUpdatedResultSubscriber.ForkChoiceUpdatedResultNotification;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -152,13 +155,17 @@ public class EventSubscriptionManagerTest {
               samplePayloadAttributes.parentBeaconBlock().blockRoot(),
               Optional.empty(),
               data.randomBytes32(),
+              Optional.empty(),
+              Optional.empty(),
               samplePayloadAttributes.proposerIndex(),
               new PayloadAttributes(
                   samplePayloadAttributes.timestamp(),
                   samplePayloadAttributes.prevRandao(),
                   samplePayloadAttributes.feeRecipient(),
                   samplePayloadAttributes.withdrawals(),
-                  Optional.of(samplePayloadAttributes.parentBeaconBlock().blockRoot()))));
+                  Optional.of(samplePayloadAttributes.parentBeaconBlock().blockRoot()),
+                  Optional.of(samplePayloadAttributes.proposalSlot()),
+                  Optional.of(samplePayloadAttributes.targetGasLimit()))));
   final ForkChoiceUpdatedResultNotification forkChoiceUpdatedResultNotification =
       new ForkChoiceUpdatedResultNotification(
           new ForkChoiceState(
@@ -243,6 +250,40 @@ public class EventSubscriptionManagerTest {
   }
 
   @Test
+  void shouldPropagateHeadV2EventAsFullBeforeGloas() throws IOException {
+    // fork choice reports every pre-Gloas head as a pending node, but a pre-Gloas block always
+    // carries its execution payload, so the event has to report it as full
+    manager =
+        new EventSubscriptionManager(
+            TestSpecFactory.createMinimalPhase0(),
+            nodeDataProvider,
+            chainDataProvider,
+            syncDataProvider,
+            configProvider,
+            asyncRunner,
+            channels,
+            StubTimeProvider.withTimeInMillis(1000),
+            10);
+    when(req.getQueryString()).thenReturn("&topics=head_v2");
+    manager.registerClient(client1);
+
+    manager.chainHeadUpdated(
+        headV2Event.getData().data().slot(),
+        headV2Event.getData().data().state(),
+        headV2Event.getData().data().block(),
+        false,
+        true,
+        headV2Event.getData().data().currentEpochDependentRoot(),
+        headV2Event.getData().data().nextEpochDependentRoot(),
+        Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING),
+        Optional.empty());
+    asyncRunner.executeQueuedActions();
+
+    assertThat(outputStream.getString()).contains("\"version\":\"phase0\"");
+    assertThat(outputStream.getString()).contains("\"payload_status\":\"full\"");
+  }
+
+  @Test
   void shouldPropagateContributions() {
     when(req.getQueryString()).thenReturn("&topics=contribution_and_proof");
     manager.registerClient(client1);
@@ -250,6 +291,34 @@ public class EventSubscriptionManagerTest {
     triggerContributionEvent();
     final String eventString = outputStream.getString();
     assertThat(eventString).contains("event: contribution_and_proof\n");
+  }
+
+  @Test
+  void shouldNotPropagateChainReorgForPayloadReorg() {
+    when(req.getQueryString()).thenReturn("&topics=chain_reorg,head");
+    manager.registerClient(client1);
+
+    manager.chainHeadUpdated(
+        headEvent.getData().getSlot(),
+        headEvent.getData().getState(),
+        headEvent.getData().getBlock(),
+        false,
+        false,
+        headEvent.getData().getPreviousDutyDependentRoot(),
+        headEvent.getData().getCurrentDutyDependentRoot(),
+        Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY),
+        Optional.of(
+            ReorgContext.payloadReorg(
+                headEvent.getData().getBlock(),
+                headEvent.getData().getSlot(),
+                headEvent.getData().getState(),
+                Bytes32.random(),
+                Bytes32.random())));
+    asyncRunner.executeQueuedActions();
+
+    final List<String> events = outputStream.getEvents();
+    assertThat(events).hasSize(1);
+    assertThat(events.get(0)).contains("event: head\n");
   }
 
   @Test
@@ -351,6 +420,93 @@ public class EventSubscriptionManagerTest {
             samplePayloadAttributesData.milestone(),
             samplePayloadAttributes,
             forkChoiceUpdatedResultNotification.forkChoiceState()));
+  }
+
+  @Test
+  void shouldIncludeGloasFieldsInPayloadAttributesEventForGloas() throws JsonProcessingException {
+    final Bytes32 safeExecutionBlockHash = data.randomBytes32();
+    final Bytes32 finalizedExecutionBlockHash = data.randomBytes32();
+
+    final String result =
+        serialize(
+            PayloadAttributesEvent.create(
+                SpecMilestone.GLOAS,
+                samplePayloadAttributes,
+                forkChoiceState(safeExecutionBlockHash, finalizedExecutionBlockHash)));
+
+    assertThat(result)
+        .contains(String.format("\"safe_block_hash\":\"%s\"", safeExecutionBlockHash))
+        .contains(String.format("\"finalized_block_hash\":\"%s\"", finalizedExecutionBlockHash))
+        .contains(String.format("\"slot_number\":\"%s\"", samplePayloadAttributes.proposalSlot()))
+        .contains(
+            String.format("\"target_gas_limit\":\"%s\"", samplePayloadAttributes.targetGasLimit()));
+  }
+
+  @Test
+  void shouldNotIncludeGloasFieldsInPayloadAttributesEventForDeneb()
+      throws JsonProcessingException {
+    final String result =
+        serialize(
+            PayloadAttributesEvent.create(
+                SpecMilestone.DENEB,
+                samplePayloadAttributes,
+                forkChoiceState(data.randomBytes32(), data.randomBytes32())));
+
+    assertThat(result)
+        .doesNotContain("safe_block_hash")
+        .doesNotContain("finalized_block_hash")
+        .doesNotContain("slot_number")
+        .doesNotContain("target_gas_limit");
+  }
+
+  @Test
+  void shouldIncludeBuilderBidIdentityInBlockEventForGloas() throws JsonProcessingException {
+    final ExecutionPayloadBid bid =
+        sampleBlock
+            .getMessage()
+            .getBody()
+            .getOptionalSignedExecutionPayloadBid()
+            .orElseThrow()
+            .getMessage();
+
+    final String result = serialize(new BlockEvent(sampleBlock, false));
+
+    assertThat(result)
+        .contains(String.format("\"builder_index\":\"%s\"", bid.getBuilderIndex()))
+        .contains(String.format("\"block_hash\":\"%s\"", bid.getBlockHash()));
+  }
+
+  @Test
+  void shouldIncludeSelfBuildBuilderIndexInBlockEvent() throws JsonProcessingException {
+    final UInt64 slot = UInt64.ONE;
+    final ExecutionPayloadBid selfBuiltBid =
+        data.randomExecutionPayloadBid(slot, BUILDER_INDEX_SELF_BUILD);
+    final SignedExecutionPayloadBid signedSelfBuiltBid =
+        SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())
+            .getSignedExecutionPayloadBidSchema()
+            .create(selfBuiltBid, data.randomSignature());
+    final SignedBeaconBlock selfBuiltBlock =
+        data.signedBlock(
+            data.randomBeaconBlock(
+                slot,
+                data.randomBeaconBlockBody(
+                    slot, builder -> builder.signedExecutionPayloadBid(signedSelfBuiltBid))));
+
+    final String result = serialize(new BlockEvent(selfBuiltBlock, false));
+
+    assertThat(result)
+        .contains(String.format("\"builder_index\":\"%s\"", BUILDER_INDEX_SELF_BUILD))
+        .contains(String.format("\"block_hash\":\"%s\"", selfBuiltBid.getBlockHash()));
+  }
+
+  @Test
+  void shouldNotIncludeBuilderBidIdentityInBlockEventBeforeGloas() throws JsonProcessingException {
+    final SignedBeaconBlock denebBlock =
+        new DataStructureUtil(TestSpecFactory.createMinimalDeneb()).randomSignedBeaconBlock(1);
+
+    final String result = serialize(new BlockEvent(denebBlock, false));
+
+    assertThat(result).doesNotContain("builder_index").doesNotContain("block_hash");
   }
 
   @Test
@@ -639,6 +795,22 @@ public class EventSubscriptionManagerTest {
   private void triggerProposerSlashingEvent() {
     manager.onNewProposerSlashing(sampleProposerSlashing, InternalValidationResult.ACCEPT, false);
     asyncRunner.executeQueuedActions();
+  }
+
+  private ForkChoiceState forkChoiceState(
+      final Bytes32 safeExecutionBlockHash, final Bytes32 finalizedExecutionBlockHash) {
+    return new ForkChoiceState(
+        ForkChoiceNode.createBase(data.randomBytes32()),
+        data.randomSlot(),
+        data.randomUInt64(),
+        samplePayloadAttributesData.data().parentExecutionBlockHash(),
+        safeExecutionBlockHash,
+        finalizedExecutionBlockHash,
+        false);
+  }
+
+  private static <T> String serialize(final Event<T> event) throws JsonProcessingException {
+    return JsonUtil.serialize(event.getData(), event.getJsonTypeDefinition());
   }
 
   private void triggerBlockEvent() {

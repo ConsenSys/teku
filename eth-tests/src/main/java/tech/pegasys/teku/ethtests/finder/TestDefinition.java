@@ -19,10 +19,13 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.TestFork;
 import tech.pegasys.teku.ethtests.TestSpecConfig;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -58,8 +61,36 @@ public class TestDefinition {
     return configName;
   }
 
+  /**
+   * The network whose configuration these fixtures are built against. This is not always the config
+   * name: fork-choice-compliance fixtures live under their own spec directory but are generated
+   * with the minimal config, so callers that need a loadable network name (rather than the fixture
+   * location) must use this.
+   */
+  public Eth2Network getNetwork() {
+    return switch (configName) {
+      case TestSpecConfig.MAINNET -> Eth2Network.MAINNET;
+      case TestSpecConfig.MINIMAL, "fork-choice-compliance" -> Eth2Network.MINIMAL;
+      default -> throw new IllegalArgumentException("Unknown configName: " + configName);
+    };
+  }
+
   public String getFork() {
     return fork;
+  }
+
+  public SpecMilestone getMilestone() {
+    return switch (fork) {
+      case TestFork.PHASE0 -> SpecMilestone.PHASE0;
+      case TestFork.ALTAIR -> SpecMilestone.ALTAIR;
+      case TestFork.BELLATRIX -> SpecMilestone.BELLATRIX;
+      case TestFork.CAPELLA -> SpecMilestone.CAPELLA;
+      case TestFork.DENEB -> SpecMilestone.DENEB;
+      case TestFork.ELECTRA -> SpecMilestone.ELECTRA;
+      case TestFork.FULU -> SpecMilestone.FULU;
+      case TestFork.GLOAS -> SpecMilestone.GLOAS;
+      default -> throw new IllegalArgumentException("Unknown fork: " + fork);
+    };
   }
 
   public Spec getSpec() {
@@ -74,24 +105,8 @@ public class TestDefinition {
   }
 
   private void createSpec(final boolean blsSignatureVerificationEnabled) {
-    final Eth2Network network =
-        switch (configName) {
-          case TestSpecConfig.MAINNET -> Eth2Network.MAINNET;
-          case TestSpecConfig.MINIMAL -> Eth2Network.MINIMAL;
-          default -> throw new IllegalArgumentException("Unknown configName: " + configName);
-        };
-    final SpecMilestone milestone =
-        switch (fork) {
-          case TestFork.PHASE0 -> SpecMilestone.PHASE0;
-          case TestFork.ALTAIR -> SpecMilestone.ALTAIR;
-          case TestFork.BELLATRIX -> SpecMilestone.BELLATRIX;
-          case TestFork.CAPELLA -> SpecMilestone.CAPELLA;
-          case TestFork.DENEB -> SpecMilestone.DENEB;
-          case TestFork.ELECTRA -> SpecMilestone.ELECTRA;
-          case TestFork.FULU -> SpecMilestone.FULU;
-          case TestFork.GLOAS -> SpecMilestone.GLOAS;
-          default -> throw new IllegalArgumentException("Unknown fork: " + fork);
-        };
+    final Eth2Network network = getNetwork();
+    final SpecMilestone milestone = getMilestone();
     final BLSSignatureVerifier blsSignatureVerifier =
         blsSignatureVerificationEnabled ? BLSSignatureVerifier.SIMPLE : BLSSignatureVerifier.NOOP;
     final Supplier<BatchSignatureVerifier> batchSignatureVerifierSupplier =
@@ -106,7 +121,7 @@ public class TestDefinition {
                 builder
                     .blsSignatureVerifier(blsSignatureVerifier)
                     .batchSignatureVerifierSupplier(batchSignatureVerifierSupplier),
-            readConfigOverrides());
+            readConfigOverrides(milestone));
   }
 
   public String getTestType() {
@@ -133,26 +148,64 @@ public class TestDefinition {
 
   public Path getTestDirectory() {
     Path directory = ReferenceTestRoot.fromSystemProperties().getSpecDirectory(configName);
-    if (!fork.isEmpty()) {
-      directory = directory.resolve(fork);
+    if (configName.equals("fork-choice-compliance")) {
+      return directory
+          .resolve("tests")
+          .resolve("minimal")
+          .resolve(fork)
+          .resolve(pathFromPhaseTestDir);
+    } else {
+      if (!fork.isEmpty()) {
+        directory = directory.resolve(fork);
+      }
+      if (!pathFromPhaseTestDir.isEmpty()) {
+        directory = directory.resolve(pathFromPhaseTestDir);
+      }
+      return directory;
     }
-    if (!pathFromPhaseTestDir.isEmpty()) {
-      directory = directory.resolve(pathFromPhaseTestDir);
-    }
-    return directory;
   }
 
   /// some reference tests ship a partial `config.yaml` overriding a handful of constants on top of
   /// the builtin config
-  private Map<String, Object> readConfigOverrides() {
+  private Map<String, Object> readConfigOverrides(final SpecMilestone milestone) {
     final Path configOverridesYaml = getTestDirectory().resolve("config.yaml");
     if (!Files.exists(configOverridesYaml)) {
       return Map.of();
     }
     try (final InputStream in = Files.newInputStream(configOverridesYaml)) {
-      return new YamlConfigReader().readValues(in);
+      return dropLaterPriorForkEpochs(new YamlConfigReader().readValues(in), milestone);
     } catch (final IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  /**
+   * Vectors may pin the test fork's epoch after genesis while leaving earlier forks at later epochs
+   * (e.g. FAR_FUTURE_EPOCH or the network's real fork epochs), since the state starts on the test
+   * fork either way. Teku requires an ordered fork schedule, so drop those overrides and keep the
+   * earlier forks active from genesis.
+   */
+  private static Map<String, Object> dropLaterPriorForkEpochs(
+      final Map<String, Object> overrides, final SpecMilestone milestone) {
+    final UInt64 forkEpoch =
+        Optional.ofNullable(overrides.get(forkEpochKey(milestone)))
+            .map(value -> UInt64.valueOf(value.toString()))
+            .orElse(UInt64.ZERO);
+    return overrides.entrySet().stream()
+        .filter(entry -> !isLaterPriorForkEpoch(entry, milestone, forkEpoch))
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+  }
+
+  private static boolean isLaterPriorForkEpoch(
+      final Map.Entry<String, Object> entry,
+      final SpecMilestone milestone,
+      final UInt64 forkEpoch) {
+    return SpecMilestone.getAllPriorMilestones(milestone).stream()
+            .anyMatch(prior -> entry.getKey().equals(forkEpochKey(prior)))
+        && UInt64.valueOf(entry.getValue().toString()).isGreaterThan(forkEpoch);
+  }
+
+  private static String forkEpochKey(final SpecMilestone milestone) {
+    return milestone.name() + "_FORK_EPOCH";
   }
 }

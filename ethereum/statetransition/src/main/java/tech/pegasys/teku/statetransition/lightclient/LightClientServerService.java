@@ -13,14 +13,23 @@
 
 package tech.pegasys.teku.statetransition.lightclient;
 
-import com.google.common.annotations.VisibleForTesting;
+import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
+import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
+
+import java.time.Duration;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -34,10 +43,12 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.util.LightClientUtil;
+import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.storage.api.ChainHeadChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
 import tech.pegasys.teku.storage.api.ReorgContext;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 
 public class LightClientServerService
@@ -45,14 +56,17 @@ public class LightClientServerService
 
   private static final Logger LOG = LogManager.getLogger();
 
-  /** Sync committee periods of updates retained behind the finalized period. */
-  @VisibleForTesting static final int MAX_RETAINED_PERIODS = 128;
-
   private final Spec spec;
   private final LightClientUpdateStore lightClientStore;
   private final Function<Bytes32, SafeFuture<Optional<SignedBeaconBlock>>> retrieveBlockByRoot;
   private final Function<Bytes32, SafeFuture<Optional<BeaconState>>> retrieveStateByRoot;
   private final BiPredicate<UInt64, Bytes32> isCanonicalBlock;
+  private final AsyncRunner asyncRunner;
+  private final TimeProvider timeProvider;
+  private final Subscribers<Consumer<LightClientFinalityUpdate>> finalityUpdateSubscribers =
+      Subscribers.create(true);
+  private final Subscribers<Consumer<LightClientOptimisticUpdate>> optimisticUpdateSubscribers =
+      Subscribers.create(true);
 
   /** Period of the latest finalized checkpoint seen; nothing below it can be orphaned. */
   private volatile UInt64 finalizedPeriod = UInt64.ZERO;
@@ -60,13 +74,17 @@ public class LightClientServerService
   public LightClientServerService(
       final Spec spec,
       final LightClientUpdateStore lightClientStore,
-      final CombinedChainDataClient combinedChainDataClient) {
+      final CombinedChainDataClient combinedChainDataClient,
+      final AsyncRunner asyncRunner,
+      final TimeProvider timeProvider) {
     this(
         spec,
         lightClientStore,
         combinedChainDataClient::getBlockByBlockRoot,
         combinedChainDataClient::getStateByBlockRoot,
-        (slot, blockRoot) -> isCanonicalBlock(combinedChainDataClient, slot, blockRoot));
+        (slot, blockRoot) -> isCanonicalBlock(combinedChainDataClient, slot, blockRoot),
+        asyncRunner,
+        timeProvider);
   }
 
   private static boolean isCanonicalBlock(
@@ -90,12 +108,26 @@ public class LightClientServerService
       final LightClientUpdateStore lightClientStore,
       final Function<Bytes32, SafeFuture<Optional<SignedBeaconBlock>>> retrieveBlockByRoot,
       final Function<Bytes32, SafeFuture<Optional<BeaconState>>> retrieveStateByRoot,
-      final BiPredicate<UInt64, Bytes32> isCanonicalBlock) {
+      final BiPredicate<UInt64, Bytes32> isCanonicalBlock,
+      final AsyncRunner asyncRunner,
+      final TimeProvider timeProvider) {
     this.spec = spec;
     this.lightClientStore = lightClientStore;
     this.retrieveBlockByRoot = retrieveBlockByRoot;
     this.retrieveStateByRoot = retrieveStateByRoot;
     this.isCanonicalBlock = isCanonicalBlock;
+    this.asyncRunner = asyncRunner;
+    this.timeProvider = timeProvider;
+  }
+
+  public void subscribeToFinalityUpdatesToPublish(
+      final Consumer<LightClientFinalityUpdate> subscriber) {
+    finalityUpdateSubscribers.subscribe(subscriber);
+  }
+
+  public void subscribeToOptimisticUpdatesToPublish(
+      final Consumer<LightClientOptimisticUpdate> subscriber) {
+    optimisticUpdateSubscribers.subscribe(subscriber);
   }
 
   @Override
@@ -150,13 +182,20 @@ public class LightClientServerService
       return;
     }
 
-    final UInt64 finalizedPeriod =
-        spec.getSyncCommitteeUtilRequired(finalizedSlot)
-            .computeSyncCommitteePeriod(checkpoint.getEpoch());
+    final SyncCommitteeUtil syncCommitteeUtil = spec.getSyncCommitteeUtilRequired(finalizedSlot);
+    this.finalizedPeriod = syncCommitteeUtil.computeSyncCommitteePeriod(checkpoint.getEpoch());
 
-    this.finalizedPeriod = finalizedPeriod;
+    final UInt64 oldestRetainedEpoch =
+        checkpoint
+            .getEpoch()
+            .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
+    lightClientStore.pruneUpdatesBefore(
+        syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch));
+  }
 
-    lightClientStore.pruneUpdatesBefore(finalizedPeriod.minusMinZero(MAX_RETAINED_PERIODS));
+  public void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
+    lightClientStore.loadUpdates(updates);
+    lightClientStore.removeNonCanonicalUpdates(finalizedPeriod, isCanonicalBlock);
   }
 
   @Override
@@ -171,7 +210,8 @@ public class LightClientServerService
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
 
-    if (optionalReorgContext.isEmpty()) {
+    // Light client updates are keyed by block: only block reorgs can orphan them
+    if (optionalReorgContext.filter(ReorgContext::isBlockReorg).isEmpty()) {
       return;
     }
 
@@ -197,13 +237,8 @@ public class LightClientServerService
           final SignedBeaconBlock attestedBlock = maybeAttestedBlock.get();
           final BeaconState attestedState = maybeAttestedState.get();
 
-          final Bytes32 finalizedRoot = attestedState.getFinalizedCheckpoint().getRoot();
-          final SafeFuture<Optional<SignedBeaconBlock>> finalizedBlockFuture;
-          if (finalizedRoot.isZero()) {
-            finalizedBlockFuture = SafeFuture.completedFuture(Optional.empty());
-          } else {
-            finalizedBlockFuture = retrieveBlockByRoot.apply(finalizedRoot);
-          }
+          final SafeFuture<Optional<SignedBeaconBlock>> finalizedBlockFuture =
+              retrieveFinalizedBlock(attestedBlock, attestedState);
 
           return finalizedBlockFuture.thenApply(
               maybeFinalizedBlock -> {
@@ -224,20 +259,82 @@ public class LightClientServerService
 
                 lightClientStore.addUpdate(update, signatureBlock.getRoot(), isCanonicalBlock);
 
+                final UInt64 genesisTimeMillis =
+                    secondsToMillis(signatureBlockPostState.getGenesisTime());
                 if (LightClientUpdateStore.isFinalityUpdate(update)) {
                   final LightClientFinalityUpdate finalityUpdate =
                       lightClientUtil.createLightClientFinalityUpdate(update);
-                  lightClientStore.addFinalityUpdate(
-                      finalityUpdate, signatureBlock.getRoot(), isCanonicalBlock);
+                  if (lightClientStore.addFinalityUpdate(
+                      finalityUpdate, signatureBlock.getRoot(), isCanonicalBlock)) {
+                    schedulePublish(
+                        finalityUpdate,
+                        finalityUpdate.getSignatureSlot().get(),
+                        genesisTimeMillis,
+                        lightClientStore::getLatestFinalityUpdate,
+                        finalityUpdateSubscribers);
+                  }
                 }
 
                 final LightClientOptimisticUpdate optimisticUpdate =
                     lightClientUtil.createLightClientOptimisticUpdate(update);
-                lightClientStore.addOptimisticUpdate(
-                    optimisticUpdate, signatureBlock.getRoot(), isCanonicalBlock);
+                if (lightClientStore.addOptimisticUpdate(
+                    optimisticUpdate, signatureBlock.getRoot(), isCanonicalBlock)) {
+                  schedulePublish(
+                      optimisticUpdate,
+                      optimisticUpdate.getSignatureSlot().get(),
+                      genesisTimeMillis,
+                      lightClientStore::getLatestOptimisticUpdate,
+                      optimisticUpdateSubscribers);
+                }
 
                 return Optional.of(update);
               });
         });
+  }
+
+  private <T> void schedulePublish(
+      final T update,
+      final UInt64 signatureSlot,
+      final UInt64 genesisTimeMillis,
+      final Supplier<Optional<T>> latestUpdate,
+      final Subscribers<Consumer<T>> subscribers) {
+    final UInt64 slotStartMillis = spec.computeTimeMillisAtSlot(signatureSlot, genesisTimeMillis);
+    final UInt64 currentTimeMillis = timeProvider.getTimeInMillis();
+
+    if (currentTimeMillis.isGreaterThanOrEqualTo(
+        slotStartMillis.plus(spec.getSlotDurationMillis(signatureSlot)))) {
+      return;
+    }
+
+    final UInt64 publishTimeMillis =
+        slotStartMillis.plus(spec.getSyncMessageDueMillis(signatureSlot));
+
+    asyncRunner
+        .runAfterDelay(
+            () -> {
+              if (latestUpdate.get().filter(update::equals).isPresent()) {
+                subscribers.forEach(subscriber -> subscriber.accept(update));
+              }
+            },
+            Duration.ofMillis(publishTimeMillis.minusMinZero(currentTimeMillis).longValue()))
+        .finishError(LOG);
+  }
+
+  private SafeFuture<Optional<SignedBeaconBlock>> retrieveFinalizedBlock(
+      final SignedBeaconBlock attestedBlock, final BeaconState attestedState) {
+    final Bytes32 finalizedRoot = attestedState.getFinalizedCheckpoint().getRoot();
+    if (!finalizedRoot.isZero()) {
+      return retrieveBlockByRoot.apply(finalizedRoot);
+    }
+    if (attestedBlock.getSlot().equals(GENESIS_SLOT)) {
+      return SafeFuture.completedFuture(Optional.of(attestedBlock));
+    }
+    if (attestedState
+        .getSlot()
+        .isGreaterThan(
+            spec.atSlot(attestedState.getSlot()).getConfig().getSlotsPerHistoricalRoot())) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    return retrieveBlockByRoot.apply(spec.getBlockRootAtSlot(attestedState, GENESIS_SLOT));
   }
 }

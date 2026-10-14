@@ -470,8 +470,11 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                     slot, randaoReveal, graffiti, includePayload, builderConfig))
         .whenException(
             __ -> {
-              // allow further block production attempts for this slot
+              // allow further block production attempts for this slot, including a new preparation
+              // (e.g. when the first attempt was made too early and so was not prepared for the
+              // slot)
               blockProductionBySlotCache.remove(slot);
+              blockProductionPreparationContextBySlotCache.remove(slot);
             });
   }
 
@@ -744,6 +747,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final IntSet syncCommitteeIndices = subscription.syncCommitteeIndices();
       performanceTracker.saveExpectedSyncCommitteeParticipant(
           subscription.validatorIndex(), syncCommitteeIndices, untilEpoch.decrement());
+      syncCommitteeSubscriptionManager.recordDuty(subscription.validatorIndex(), unsubscribeSlot);
       syncCommitteeUtil
           .getSyncSubcommittees(syncCommitteeIndices)
           .forEach(index -> syncCommitteeSubscriptionManager.subscribe(index, unsubscribeSlot));

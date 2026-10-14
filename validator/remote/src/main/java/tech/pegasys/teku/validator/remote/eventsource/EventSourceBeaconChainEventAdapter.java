@@ -40,6 +40,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.UrlSanitizer;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.beaconnode.BeaconChainEventAdapter;
 import tech.pegasys.teku.validator.remote.BeaconNodeReadinessChannel;
@@ -65,9 +66,9 @@ public class EventSourceBeaconChainEventAdapter
   private final OkHttpClient okHttpClient;
   private final ValidatorLogger validatorLogger;
   private final BeaconChainEventAdapter timeBasedEventAdapter;
+  private final boolean generateEarlyAttestations;
   private final ValidatorTimingChannel validatorTimingChannel;
   private final EventStreamMetrics eventStreamMetrics;
-  private final boolean generateEarlyAttestations;
   private final Spec spec;
 
   private final boolean shutdownWhenValidatorSlashedEnabled;
@@ -93,8 +94,8 @@ public class EventSourceBeaconChainEventAdapter
     this.validatorTimingChannel = validatorTimingChannel;
     this.eventStreamMetrics = EventStreamMetrics.create(metricsSystem);
     this.generateEarlyAttestations = generateEarlyAttestations;
-    this.spec = spec;
     this.shutdownWhenValidatorSlashedEnabled = shutdownWhenValidatorSlashedEnabled;
+    this.spec = spec;
   }
 
   @Override
@@ -149,7 +150,8 @@ public class EventSourceBeaconChainEventAdapter
   BackgroundEventSource createEventSource(final RemoteValidatorApiChannel beaconNodeApi) {
 
     final List<EventType> eventTypes = new ArrayList<>();
-    eventTypes.add(EventType.head);
+    eventTypes.add(
+        spec.isMilestoneSupported(SpecMilestone.GLOAS) ? EventType.head_v2 : EventType.head);
     if (shutdownWhenValidatorSlashedEnabled) {
       eventTypes.add(EventType.attester_slashing);
       eventTypes.add(EventType.proposer_slashing);
@@ -214,7 +216,7 @@ public class EventSourceBeaconChainEventAdapter
         failoverBeaconNodeApis.stream()
             .filter(beaconNodeReadinessManager::isReady)
             .filter(failover -> !currentEventStreamHasSameEndpoint(failover))
-            .max(Comparator.comparing(beaconNodeReadinessManager::getReadinessStatusWeight));
+            .max(Comparator.comparingInt(beaconNodeReadinessManager::getReadinessStatusWeight));
     if (readyFailover.isPresent()) {
       switchToFailoverEventStream(readyFailover.get());
       return true;

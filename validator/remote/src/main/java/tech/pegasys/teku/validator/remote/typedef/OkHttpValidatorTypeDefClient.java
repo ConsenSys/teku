@@ -352,14 +352,14 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
   public List<SubmitDataError> sendPayloadAttestationMessages(
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
     final SendPayloadAttestationMessagesRequest sendPayloadAttestationMessagesRequest =
-        new SendPayloadAttestationMessagesRequest(getBaseEndpoint(), getOkHttpClient());
+        new SendPayloadAttestationMessagesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendPayloadAttestationMessagesRequest.submit(payloadAttestationMessages);
   }
 
   public List<SubmitDataError> sendSignedProposerPreferences(
       final List<SignedProposerPreferences> signedProposerPreferences) {
     final SendSignedProposerPreferencesRequest sendSignedProposerPreferencesRequest =
-        new SendSignedProposerPreferencesRequest(getBaseEndpoint(), getOkHttpClient());
+        new SendSignedProposerPreferencesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendSignedProposerPreferencesRequest.submit(signedProposerPreferences);
   }
 

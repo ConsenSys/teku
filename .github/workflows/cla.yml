@@ -27,4 +27,4 @@ jobs:
           path-to-signatures: 'signatures/version1/cla.json'
           path-to-document: 'https://github.com/Consensys/cla/blob/main/CLA.md' 
           branch: 'cla'
-          allowlist: dependabot[bot],protocols-renovate[bot]
+          allowlist: dependabot[bot],ci-protocols-renovate[bot]

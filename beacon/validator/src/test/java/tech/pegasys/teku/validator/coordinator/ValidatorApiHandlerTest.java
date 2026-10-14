@@ -665,6 +665,37 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void createUnsignedBlock_shouldPrepareAgainIfFirstAttemptFailed() {
+    final UInt64 newSlot = UInt64.valueOf(25);
+    final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
+    final BLSSignature randaoReveal = dataStructureUtil.randomSignature();
+    final BlockContainerAndMetaData blockContainerAndMetaData =
+        dataStructureUtil.randomBlockContainerAndMetaData(newSlot);
+
+    mockRequiredMethodsForBlockProduction(blockSlotState, newSlot);
+
+    when(blockFactory.createUnsignedBlock(any()))
+        .thenThrow(new IllegalStateException("oopsy"))
+        .thenReturn(SafeFuture.completedFuture(blockContainerAndMetaData));
+
+    // first call should fail
+    SafeFuture<Optional<BlockContainerAndMetaData>> result =
+        validatorApiHandler.createUnsignedBlock(
+            newSlot, randaoReveal, Optional.empty(), Optional.of(ONE));
+
+    assertThat(result).isCompletedExceptionally();
+    verify(forkChoiceTrigger).prepareForBlockProduction(eq(newSlot), any());
+
+    // second call in the same slot must not reuse the preparation of the failed attempt
+    result =
+        validatorApiHandler.createUnsignedBlock(
+            newSlot, randaoReveal, Optional.empty(), Optional.of(ONE));
+
+    assertThat(result).isCompletedWithValue(Optional.of(blockContainerAndMetaData));
+    verify(forkChoiceTrigger, times(2)).prepareForBlockProduction(eq(newSlot), any());
+  }
+
+  @Test
   public void onBlockProductionPreparationDue_shouldReusePreparedChainHeadWhenCreatingBlock() {
     final UInt64 newSlot = UInt64.valueOf(25);
     final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
@@ -919,6 +950,9 @@ class ValidatorApiHandlerTest {
 
     verify(syncCommitteeSubscriptionManager).subscribe(0, unsubscribeSlotSubscription2);
     verify(syncCommitteeSubscriptionManager).subscribe(1, unsubscribeSlotSubscription2);
+
+    verify(syncCommitteeSubscriptionManager).recordDuty(1, unsubscribeSlotSubscription1);
+    verify(syncCommitteeSubscriptionManager).recordDuty(1, unsubscribeSlotSubscription2);
     verifyNoMoreInteractions(syncCommitteeSubscriptionManager);
   }
 
