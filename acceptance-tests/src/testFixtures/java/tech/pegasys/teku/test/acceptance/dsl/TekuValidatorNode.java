@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.test.acceptance.dsl;
 
+import static tech.pegasys.teku.test.acceptance.dsl.metrics.MetricConditions.withLabelValueSubstring;
 import static tech.pegasys.teku.test.acceptance.dsl.metrics.MetricConditions.withLabelsContaining;
 import static tech.pegasys.teku.test.acceptance.dsl.metrics.MetricConditions.withNameEqualsTo;
 import static tech.pegasys.teku.test.acceptance.dsl.metrics.MetricConditions.withValueGreaterThan;
@@ -74,6 +75,17 @@ public class TekuValidatorNode extends TekuNode {
                 "endpoint", node.getBeaconRestApiUrl() + "/",
                 "method", "get_proposer_duties",
                 "outcome", "success")),
+        withValueGreaterThan(0));
+  }
+
+  /**
+   * Duties are also driven by the slot timer, so they complete even when the event stream delivers
+   * nothing at all. Matches both head and head_v2 events.
+   */
+  public void waitForHeadEventsReceived() {
+    waitForMetric(
+        withNameEqualsTo("validator_event_stream_events_total"),
+        withLabelValueSubstring("type", "head"),
         withValueGreaterThan(0));
   }
 

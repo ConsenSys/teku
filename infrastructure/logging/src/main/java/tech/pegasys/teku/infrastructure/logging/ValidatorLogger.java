@@ -53,7 +53,8 @@ public class ValidatorLogger {
         ColorConsolePrinter.print(
             String.format(
                 "%sNo head events were received from the beacon node event stream before it failed: %s. "
-                    + "Duties will be driven by the slot timer alone",
+                    + "The beacon node is likely outdated, please upgrade it to the latest version. "
+                    + "Duties will be driven by the slot timer alone until head events are received",
                 PREFIX, beaconNodeEndpoint),
             Color.YELLOW));
   }

@@ -18,7 +18,6 @@ import com.google.common.base.Throwables;
 import com.launchdarkly.eventsource.MessageEvent;
 import com.launchdarkly.eventsource.background.BackgroundEventHandler;
 import java.net.SocketTimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -39,6 +38,7 @@ class EventSourceHandler implements BackgroundEventHandler {
   private static final Logger LOG = LogManager.getLogger();
 
   private final ValidatorTimingChannel validatorTimingChannel;
+  private final LabelledMetric<Counter> eventCounter;
   private final Counter disconnectCounter;
   private final Counter invalidEventCounter;
   private final Counter timeoutCounter;
@@ -47,12 +47,15 @@ class EventSourceHandler implements BackgroundEventHandler {
   private final ValidatorLogger validatorLogger;
   private final String beaconNodeEndpoint;
 
+  // The event source dispatches every callback on a single thread, so the connection state below
+  // does not need to be thread safe.
+
   /**
    * Whether a stream to this beacon node is currently open. Only a stream which was opened and then
    * failed tells us anything about the events the beacon node delivers: never reaching the node at
    * all is reported elsewhere.
    */
-  private final AtomicBoolean connected = new AtomicBoolean(false);
+  private boolean connected = false;
 
   /**
    * Whether the current connection has delivered a head or head_v2 event. A beacon node which does
@@ -61,7 +64,7 @@ class EventSourceHandler implements BackgroundEventHandler {
    * client silently running on timer driven duties alone. A handler belongs to a single beacon
    * node, so one node failing to deliver events says nothing about the others.
    */
-  private final AtomicBoolean headEventReceivedSinceConnected = new AtomicBoolean(false);
+  private boolean headEventReceivedSinceConnected = false;
 
   private final Spec spec;
 
@@ -73,6 +76,12 @@ class EventSourceHandler implements BackgroundEventHandler {
       final ValidatorLogger validatorLogger,
       final String beaconNodeEndpoint) {
     this.validatorTimingChannel = validatorTimingChannel;
+    eventCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.VALIDATOR,
+            "event_stream_events_total",
+            "Event stream events processed, by event type",
+            "type");
     invalidEventCounter =
         metricsSystem.createCounter(
             TekuMetricCategory.VALIDATOR,
@@ -96,8 +105,8 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   @Override
   public void onOpen() {
-    connected.set(true);
-    headEventReceivedSinceConnected.set(false);
+    connected = true;
+    headEventReceivedSinceConnected = false;
     validatorLogger.connectedToBeaconNodeEventStream();
     // We might have missed some events while connecting or reconnected so ensure the duties are
     // recalculated
@@ -115,16 +124,23 @@ class EventSourceHandler implements BackgroundEventHandler {
     LOG.trace("Received {} event from beacon node {}", event, messageEvent.getOrigin());
     try {
       final EventType eventType = EventType.valueOf(event);
-      if (eventType == EventType.head || eventType == EventType.head_v2) {
-        headEventReceivedSinceConnected.set(true);
-      }
       switch (eventType) {
-        case head -> handleHeadEvent(messageEvent.getData());
-        case head_v2 -> handleHeadV2Event(messageEvent.getData());
+        case head -> {
+          handleHeadEvent(messageEvent.getData());
+          headEventReceivedSinceConnected = true;
+        }
+        case head_v2 -> {
+          handleHeadV2Event(messageEvent.getData());
+          headEventReceivedSinceConnected = true;
+        }
         case attester_slashing -> handleAttesterSlashingEvent(messageEvent.getData());
         case proposer_slashing -> handleProposerSlashingEvent(messageEvent.getData());
-        default -> LOG.warn("Received unexpected event type: " + event);
+        default -> {
+          LOG.warn("Received unexpected event type: " + event);
+          return;
+        }
       }
+      eventCounter.labels(eventType.name()).inc();
     } catch (final IllegalArgumentException | JsonProcessingException e) {
       invalidEventCounter.inc();
       LOG.warn(
@@ -178,15 +194,13 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   @Override
   public void onError(final Throwable t) {
-    final boolean wasConnected = connected.getAndSet(false);
-    if (wasConnected) {
+    if (connected) {
+      connected = false;
       warnIfNoHeadEventsWereReceived();
     }
     if (Throwables.getRootCause(t) instanceof SocketTimeoutException) {
       timeoutCounter.inc();
-      LOG.info(
-          "Timed out waiting for events from beacon node event stream. "
-              + "Reconnecting. This is normal if the beacon node is still syncing.");
+      LOG.info("Timed out waiting for events from beacon node event stream. Reconnecting.");
     } else {
       errorCounter.inc();
       validatorLogger.beaconNodeEventStreamConnectionError();
@@ -194,7 +208,7 @@ class EventSourceHandler implements BackgroundEventHandler {
   }
 
   private void warnIfNoHeadEventsWereReceived() {
-    if (!headEventReceivedSinceConnected.get()) {
+    if (!headEventReceivedSinceConnected) {
       validatorLogger.noHeadEventsReceivedFromBeaconNodeEventStream(beaconNodeEndpoint);
     }
   }

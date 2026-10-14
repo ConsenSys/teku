@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.remote.eventsource;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -32,6 +33,7 @@ import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -320,6 +322,33 @@ class EventSourceHandlerTest {
   }
 
   @Test
+  void onError_shouldWarnWhenTheStreamDeliveredOnlyInvalidHeadEvents() {
+    handler.onOpen();
+    handler.onMessage(EventType.head.name(), new MessageEvent("{\"not\":\"a head event\"}"));
+
+    handler.onError(new IOException("connection reset"));
+
+    verify(validatorLogger).noHeadEventsReceivedFromBeaconNodeEventStream(ENDPOINT);
+  }
+
+  @Test
+  void onMessage_shouldCountHandledEventsByType() throws Exception {
+    handler.onMessage(EventType.head.name(), headEvent());
+    handler.onMessage(EventType.head.name(), headEvent());
+    handler.onMessage(EventType.head_v2.name(), headV2Event());
+
+    assertThat(getEventCount(EventType.head)).isEqualTo(2);
+    assertThat(getEventCount(EventType.head_v2)).isEqualTo(1);
+  }
+
+  @Test
+  void onMessage_shouldNotCountInvalidEvents() {
+    handler.onMessage(EventType.head.name(), new MessageEvent("{\"not\":\"a head event\"}"));
+
+    assertThat(getEventCount(EventType.head)).isZero();
+  }
+
+  @Test
   void onError_shouldNotBeSatisfiedByEventsOtherThanHeadEvents() throws Exception {
     final AttesterSlashingSchema attesterSlashingSchema =
         spec.getGenesisSchemaDefinitions().getAttesterSlashingSchema();
@@ -359,6 +388,11 @@ class EventSourceHandlerTest {
         spec,
         validatorLogger,
         ENDPOINT);
+  }
+
+  private long getEventCount(final EventType eventType) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.VALIDATOR, "event_stream_events_total", eventType.name());
   }
 
   private MessageEvent headV2Event() throws Exception {

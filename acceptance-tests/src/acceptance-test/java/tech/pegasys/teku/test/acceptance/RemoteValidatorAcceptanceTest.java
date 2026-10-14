@@ -71,7 +71,6 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
 
     beaconNode.start();
 
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
   }
 
@@ -97,14 +96,12 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
 
     validatorClient.start();
 
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
 
     beaconNode.stop(false);
 
     validatorClient.waitForLogMessageContaining(
         "Switching to failover beacon node for event streaming");
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
 
     // primary beacon node recovers
@@ -112,7 +109,6 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
 
     validatorClient.waitForLogMessageContaining(
         "Switching back to the primary beacon node for event streaming");
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
   }
 
@@ -142,7 +138,6 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
         "The primary beacon node is NOT ready to accept requests");
     validatorClient.waitForLogMessageContaining(
         "Switching to failover beacon node for event streaming");
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
   }
 
@@ -152,20 +147,21 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
   }
 
   private void waitForValidatorDutiesToComplete() {
+    waitForSuccessfulEventStreamConnection();
+    validatorClient.waitForHeadEventsReceived();
     validatorClient.waitForLogMessageContaining("Published block");
     validatorClient.waitForLogMessageContaining("Published attestation");
     validatorClient.waitForLogMessageContaining("Published aggregate");
     validatorClient.waitForLogMessageContaining("Published sync_signature");
     validatorClient.waitForLogMessageContaining("Published sync_contribution");
-    assertHeadEventsWereReceived();
+    assertNoMissingHeadEventsWarning();
   }
 
   /**
-   * Duties are also driven by the slot timer, so they complete even when the event stream delivers
-   * nothing at all. The validator client reports a stream which was opened and then failed without
-   * delivering any head event, and on a healthy connection that must never happen.
+   * The validator client reports a stream which was opened and then failed without delivering any
+   * head event, and on a healthy connection that must never happen.
    */
-  private void assertHeadEventsWereReceived() {
+  private void assertNoMissingHeadEventsWarning() {
     assertThat(
             validatorClient.getFilteredOutputContaining(
                 "No head events were received from the beacon node event stream"))
