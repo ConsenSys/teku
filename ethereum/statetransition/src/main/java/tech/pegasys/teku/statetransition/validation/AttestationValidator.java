@@ -42,6 +42,7 @@ public class AttestationValidator {
 
   private final Spec spec;
   private final AsyncBLSSignatureVerifier signatureVerifier;
+  private final AsyncBLSSignatureVerifier urgentSignatureVerifier;
   private final GossipValidationHelper gossipValidationHelper;
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
   private final Set<Bytes32> blockRootsWithInvalidExecutionPayload;
@@ -73,8 +74,29 @@ public class AttestationValidator {
       final GossipValidationHelper gossipValidationHelper,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots,
       final Set<Bytes32> blockRootsWithInvalidExecutionPayload) {
+    this(
+        spec,
+        signatureVerifier,
+        signatureVerifier,
+        gossipValidationHelper,
+        invalidBlockRoots,
+        blockRootsWithInvalidExecutionPayload);
+  }
+
+  /**
+   * @param urgentSignatureVerifier used for attestations produced by this node's own validators,
+   *     which must not be held back by batching delays before they are broadcast
+   */
+  public AttestationValidator(
+      final Spec spec,
+      final AsyncBLSSignatureVerifier signatureVerifier,
+      final AsyncBLSSignatureVerifier urgentSignatureVerifier,
+      final GossipValidationHelper gossipValidationHelper,
+      final Map<Bytes32, BlockImportResult> invalidBlockRoots,
+      final Set<Bytes32> blockRootsWithInvalidExecutionPayload) {
     this.spec = spec;
     this.signatureVerifier = signatureVerifier;
+    this.urgentSignatureVerifier = urgentSignatureVerifier;
     this.gossipValidationHelper = gossipValidationHelper;
     this.invalidBlockRoots = invalidBlockRoots;
     this.blockRootsWithInvalidExecutionPayload = blockRootsWithInvalidExecutionPayload;
@@ -101,7 +123,9 @@ public class AttestationValidator {
       return SafeFuture.completedFuture(InternalValidationResult.ACCEPT);
     }
     return singleOrAggregateAttestationChecks(
-            signatureVerifier,
+            validatableAttestation.isProducedLocally()
+                ? urgentSignatureVerifier
+                : signatureVerifier,
             validatableAttestation,
             validatableAttestation.getReceivedSubnetId(),
             true,

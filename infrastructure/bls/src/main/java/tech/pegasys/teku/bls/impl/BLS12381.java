@@ -139,6 +139,31 @@ public interface BLS12381 {
   /**
    * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
    *
+   * <p>Variant of {@link #prepareBatchVerify(int, List, Bytes, Signature)} for several signatures
+   * over the <b>same</b> message. Since <code>e(P1 * r1, M) * e(P2 * r2, M) * ... = e(P1 * r1 + P2
+   * * r2 + ..., M)</code> the message is hashed to the curve and paired only once, while the random
+   * multipliers are still applied to each signature and aggregated public key individually.
+   *
+   * <p>For above batch verification method pre-calculates and returns two values: <code>
+   * S1 * r1 + S2 * r2 + ...</code> and <code>e(P1 * r1 + P2 * r2 + ..., M)</code>
+   *
+   * @param index index of the first signature in a batch
+   * @param publicKeys one list of public keys per signature (aggregated per signature)
+   * @param message the message all signatures are over
+   * @param signatures the signatures, same size as publicKeys
+   * @param parallel whether per-signature work may be spread over the common ForkJoinPool
+   * @return the pair of values above in an opaque instance
+   */
+  BatchSemiAggregate prepareBatchVerifySameMessage(
+      int index,
+      List<? extends List<? extends PublicKey>> publicKeys,
+      Bytes message,
+      List<? extends Signature> signatures,
+      boolean parallel);
+
+  /**
+   * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
+   *
    * <p>Does the final job of batch verification: calculates the final product and sum, does final
    * pairing and exponentiation
    *

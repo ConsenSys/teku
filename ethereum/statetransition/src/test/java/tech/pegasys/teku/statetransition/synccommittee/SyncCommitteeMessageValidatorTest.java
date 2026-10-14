@@ -46,6 +46,7 @@ import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
+import tech.pegasys.teku.statetransition.validation.signatures.RecordingSignatureVerifier;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
@@ -423,5 +424,51 @@ class SyncCommitteeMessageValidatorTest {
     doReturn(subcommitteeIds).when(assignmentsSpy).getAssignedSubcommittees();
 
     return validatableMessageSpy;
+  }
+
+  @Test
+  void shouldUseUrgentVerifierOnlyForLocallyProducedMessages() {
+    setupWithDefaultSpec();
+    final SyncCommitteeMessage message = chainBuilder.createValidSyncCommitteeMessage();
+    final SyncSubcommitteeAssignments assignments =
+        spec.getSyncCommitteeUtilRequired(UInt64.ZERO)
+            .getSubcommitteeAssignments(
+                chainBuilder.getLatestBlockAndState().getState(),
+                chainBuilder.getLatestEpoch(),
+                message.getValidatorIndex());
+    final int validSubnetId = assignments.getAssignedSubcommittees().iterator().nextInt();
+
+    final RecordingSignatureVerifier localNormal = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier localUrgent = new RecordingSignatureVerifier();
+    final SyncCommitteeMessageValidator localValidator =
+        new SyncCommitteeMessageValidator(
+            spec,
+            recentChainData,
+            new SyncCommitteeStateUtils(spec, recentChainData),
+            localNormal,
+            localUrgent,
+            gossipValidationHelper);
+    assertThat(localValidator.validate(ValidatableSyncCommitteeMessage.fromValidator(message)))
+        .isCompletedWithValue(ACCEPT);
+    assertThat(localUrgent.getVerifyCount()).isEqualTo(1);
+    assertThat(localNormal.getVerifyCount()).isZero();
+
+    // Fresh validator so the seen-message caches do not short-circuit the second validation
+    final RecordingSignatureVerifier networkNormal = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier networkUrgent = new RecordingSignatureVerifier();
+    final SyncCommitteeMessageValidator networkValidator =
+        new SyncCommitteeMessageValidator(
+            spec,
+            recentChainData,
+            new SyncCommitteeStateUtils(spec, recentChainData),
+            networkNormal,
+            networkUrgent,
+            gossipValidationHelper);
+    assertThat(
+            networkValidator.validate(
+                ValidatableSyncCommitteeMessage.fromNetwork(message, validSubnetId)))
+        .isCompletedWithValue(ACCEPT);
+    assertThat(networkNormal.getVerifyCount()).isEqualTo(1);
+    assertThat(networkUrgent.getVerifyCount()).isZero();
   }
 }

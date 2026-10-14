@@ -2064,7 +2064,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
             p2PConfig.getBatchVerifyMaxThreads(),
             p2PConfig.getBatchVerifyQueueCapacity(),
             p2PConfig.getBatchVerifyMaxBatchSize(),
-            p2PConfig.isBatchVerifyStrictThreadLimitEnabled());
+            p2PConfig.isBatchVerifyStrictThreadLimitEnabled(),
+            p2PConfig.getBatchVerifyGatherTimeout(),
+            p2PConfig.getBatchVerifyGatherTargetSize());
   }
 
   protected void initAttestationManager() {
@@ -2078,11 +2080,16 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new AttestationValidator(
             spec,
             signatureVerificationService,
+            signatureVerificationService.urgent(),
             gossipValidationHelper,
             invalidBlockRoots,
             blockRootsWithInvalidExecutionPayload);
     AggregateAttestationValidator aggregateValidator =
-        new AggregateAttestationValidator(spec, attestationValidator, signatureVerificationService);
+        new AggregateAttestationValidator(
+            spec,
+            attestationValidator,
+            signatureVerificationService,
+            signatureVerificationService.urgent());
     blockImporter.subscribeToVerifiedBlockAttestations(
         (slot, attestations) ->
             attestations.forEach(
@@ -2116,6 +2123,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 recentChainData,
                 syncCommitteeStateUtils,
                 signatureVerificationService,
+                signatureVerificationService.urgent(),
                 gossipValidationHelper));
 
     syncCommitteeMessagePool =
@@ -2126,6 +2134,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 recentChainData,
                 syncCommitteeStateUtils,
                 signatureVerificationService,
+                signatureVerificationService.urgent(),
                 gossipValidationHelper));
     eventChannels
         .subscribe(SlotEventsChannel.class, syncCommitteeContributionPool)

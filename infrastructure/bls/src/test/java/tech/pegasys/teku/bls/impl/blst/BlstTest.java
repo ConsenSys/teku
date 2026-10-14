@@ -18,10 +18,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 import java.util.Random;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import supranational.blst.P2;
 import tech.pegasys.teku.bls.BatchSemiAggregate;
 import tech.pegasys.teku.bls.impl.AbstractBLS12381Test;
 import tech.pegasys.teku.bls.impl.BLS12381;
@@ -100,5 +102,181 @@ public class BlstTest extends AbstractBLS12381Test {
     assertThrows(
         IllegalArgumentException.class,
         () -> bls.prepareBatchVerify(0, List.of(blstPK), msg, blstSignature));
+  }
+
+  @Test
+  void batchVerifySameMessageSucceedsForValidSignatures() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(5);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> signatures =
+        secretKeys.stream().map(sk -> BlstBLS12381.sign(sk, msg)).toList();
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
+  }
+
+  @Test
+  void batchVerifySameMessageSucceedsWhenParallel() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(64);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> signatures =
+        secretKeys.stream().map(sk -> BlstBLS12381.sign(sk, msg)).toList();
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, true);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
+  }
+
+  @Test
+  void batchVerifySameMessageFailsWhenOneSignatureIsForAnotherMessage() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final Bytes otherMsg = Bytes32.fromHexString("fedcba");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(4);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> signatures =
+        List.of(
+            BlstBLS12381.sign(secretKeys.get(0), msg),
+            BlstBLS12381.sign(secretKeys.get(1), msg),
+            BlstBLS12381.sign(secretKeys.get(2), otherMsg),
+            BlstBLS12381.sign(secretKeys.get(3), msg));
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
+  }
+
+  @Test
+  void batchVerifySameMessageFailsWhenSignaturesAreOnlyValidInAggregate() {
+    // sig1 + D and sig2 - D sum to a valid aggregate but are individually invalid.
+    // Plain aggregation would accept them; randomised batch verification must not.
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(2);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final BlstSignature sig1 = BlstBLS12381.sign(secretKeys.get(0), msg);
+    final BlstSignature sig2 = BlstBLS12381.sign(secretKeys.get(1), msg);
+    final P2 delta = new P2().hash_to(Bytes32.fromHexString("1234").toArrayUnsafe(), "delta");
+    final BlstSignature tampered1 = new BlstSignature(new P2(sig1.ec2Point).add(delta).to_affine());
+    final BlstSignature tampered2 =
+        new BlstSignature(new P2(sig2.ec2Point).add(delta.neg()).to_affine());
+
+    // Sanity check: the tampered signatures do aggregate to the valid aggregate signature
+    assertThat(BlstSignature.aggregate(List.of(tampered1, tampered2)).toBytesCompressed())
+        .isEqualTo(BlstSignature.aggregate(List.of(sig1, sig2)).toBytesCompressed());
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, List.of(tampered1, tampered2), false);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
+  }
+
+  @Test
+  void batchVerifySameMessageThrowsForSignatureNotInG2() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(2);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> signatures =
+        List.of(BlstBLS12381.sign(secretKeys.get(0), msg), notInG2());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false));
+  }
+
+  @Test
+  void batchVerifySameMessageIsInvalidForInfinityPublicKey() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final BlstSecretKey secretKey = BlstSecretKey.generateNew(RANDOM);
+    final BlstPublicKey infinityKey = BlstSecretKey.fromBytes(Bytes32.ZERO).derivePublicKey();
+    assertThat(infinityKey.isInfinity()).isTrue();
+    final BlstSignature signature = BlstBLS12381.sign(secretKey, msg);
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifySameMessage(
+            0,
+            List.of(List.of(secretKey.derivePublicKey()), List.of(infinityKey)),
+            msg,
+            List.of(signature, signature),
+            false);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
+  }
+
+  @Test
+  void batchVerifySameMessageSupportsAggregateSignatures() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(6);
+    final List<List<BlstPublicKey>> publicKeys =
+        List.of(
+            List.of(secretKeys.get(0).derivePublicKey(), secretKeys.get(1).derivePublicKey()),
+            List.of(secretKeys.get(2).derivePublicKey()),
+            List.of(
+                secretKeys.get(3).derivePublicKey(),
+                secretKeys.get(4).derivePublicKey(),
+                secretKeys.get(5).derivePublicKey()));
+    final List<BlstSignature> signatures =
+        List.of(
+            BlstSignature.aggregate(
+                List.of(
+                    BlstBLS12381.sign(secretKeys.get(0), msg),
+                    BlstBLS12381.sign(secretKeys.get(1), msg))),
+            BlstBLS12381.sign(secretKeys.get(2), msg),
+            BlstSignature.aggregate(
+                List.of(
+                    BlstBLS12381.sign(secretKeys.get(3), msg),
+                    BlstBLS12381.sign(secretKeys.get(4), msg),
+                    BlstBLS12381.sign(secretKeys.get(5), msg))));
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
+  }
+
+  @Test
+  void batchVerifySameMessageCanBeCompletedTogetherWithOtherSemiAggregates() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final Bytes otherMsg = Bytes32.fromHexString("fedcba");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(4);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.subList(0, 3).stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> signatures =
+        secretKeys.subList(0, 3).stream().map(sk -> BlstBLS12381.sign(sk, msg)).toList();
+
+    // completeBatchVerify merges into the first semi-aggregate, so build one per call
+    final BatchSemiAggregate sameMessageAggregate1 =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+    final BatchSemiAggregate sameMessageAggregate2 =
+        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+    final BatchSemiAggregate otherAggregate =
+        bls.prepareBatchVerify(
+            3,
+            List.of(secretKeys.get(3).derivePublicKey()),
+            otherMsg,
+            BlstBLS12381.sign(secretKeys.get(3), otherMsg));
+    final BatchSemiAggregate invalidOtherAggregate =
+        bls.prepareBatchVerify(
+            3,
+            List.of(secretKeys.get(3).derivePublicKey()),
+            otherMsg,
+            BlstBLS12381.sign(secretKeys.get(3), msg));
+
+    assertThat(bls.completeBatchVerify(List.of(sameMessageAggregate1, otherAggregate))).isTrue();
+    assertThat(bls.completeBatchVerify(List.of(sameMessageAggregate2, invalidOtherAggregate)))
+        .isFalse();
+  }
+
+  private static List<BlstSecretKey> randomSecretKeys(final int count) {
+    return IntStream.range(0, count).mapToObj(__ -> BlstSecretKey.generateNew(RANDOM)).toList();
   }
 }

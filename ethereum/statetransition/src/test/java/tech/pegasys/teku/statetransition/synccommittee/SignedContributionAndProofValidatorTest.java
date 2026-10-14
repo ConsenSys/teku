@@ -35,6 +35,7 @@ import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
+import tech.pegasys.teku.statetransition.validation.signatures.RecordingSignatureVerifier;
 import tech.pegasys.teku.statetransition.validation.signatures.SimpleSignatureVerificationService;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
@@ -375,5 +376,43 @@ class SignedContributionAndProofValidatorTest {
             .resetParticipantsToOnlyAggregator()
             .build();
     assertThat(validator.validate(message)).isCompletedWithValue(ACCEPT);
+  }
+
+  @Test
+  void shouldUseUrgentVerifierOnlyForLocallyProducedContributions() {
+    setupWithDefaultSpec();
+    final SignedContributionAndProof message =
+        chainBuilder.createValidSignedContributionAndProofBuilder().build();
+
+    final RecordingSignatureVerifier localNormal = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier localUrgent = new RecordingSignatureVerifier();
+    final SignedContributionAndProofValidator localValidator =
+        new SignedContributionAndProofValidator(
+            spec,
+            storageSystem.recentChainData(),
+            syncCommitteeStateUtils,
+            localNormal,
+            localUrgent,
+            new GossipValidationHelper(
+                spec, storageSystem.recentChainData(), storageSystem.getMetricsSystem()));
+    assertThat(localValidator.validate(message, true)).isCompletedWithValue(ACCEPT);
+    assertThat(localUrgent.getVerifyCount()).isEqualTo(1);
+    assertThat(localNormal.getVerifyCount()).isZero();
+
+    // Fresh validator so the seen-contribution caches do not short-circuit the second validation
+    final RecordingSignatureVerifier networkNormal = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier networkUrgent = new RecordingSignatureVerifier();
+    final SignedContributionAndProofValidator networkValidator =
+        new SignedContributionAndProofValidator(
+            spec,
+            storageSystem.recentChainData(),
+            syncCommitteeStateUtils,
+            networkNormal,
+            networkUrgent,
+            new GossipValidationHelper(
+                spec, storageSystem.recentChainData(), storageSystem.getMetricsSystem()));
+    assertThat(networkValidator.validate(message, false)).isCompletedWithValue(ACCEPT);
+    assertThat(networkNormal.getVerifyCount()).isEqualTo(1);
+    assertThat(networkUrgent.getVerifyCount()).isZero();
   }
 }

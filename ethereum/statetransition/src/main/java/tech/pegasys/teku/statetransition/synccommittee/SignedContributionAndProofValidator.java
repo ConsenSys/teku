@@ -59,6 +59,7 @@ public class SignedContributionAndProofValidator {
       new SeenAggregatesCache<>(VALID_CONTRIBUTION_AND_PROOF_SET_SIZE);
   private final SyncCommitteeStateUtils syncCommitteeStateUtils;
   private final AsyncBLSSignatureVerifier signatureVerifier;
+  private final AsyncBLSSignatureVerifier urgentSignatureVerifier;
   private final GossipValidationHelper gossipValidationHelper;
 
   private final RecentChainData recentChainData;
@@ -69,14 +70,44 @@ public class SignedContributionAndProofValidator {
       final SyncCommitteeStateUtils syncCommitteeStateUtils,
       final AsyncBLSSignatureVerifier signatureVerifier,
       final GossipValidationHelper gossipValidationHelper) {
+    this(
+        spec,
+        recentChainData,
+        syncCommitteeStateUtils,
+        signatureVerifier,
+        signatureVerifier,
+        gossipValidationHelper);
+  }
+
+  /**
+   * @param urgentSignatureVerifier used for contributions produced by this node's own validators,
+   *     which must not be held back by batching delays before they are broadcast
+   */
+  public SignedContributionAndProofValidator(
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final SyncCommitteeStateUtils syncCommitteeStateUtils,
+      final AsyncBLSSignatureVerifier signatureVerifier,
+      final AsyncBLSSignatureVerifier urgentSignatureVerifier,
+      final GossipValidationHelper gossipValidationHelper) {
     this.spec = spec;
     this.syncCommitteeStateUtils = syncCommitteeStateUtils;
     this.signatureVerifier = signatureVerifier;
+    this.urgentSignatureVerifier = urgentSignatureVerifier;
     this.recentChainData = recentChainData;
     this.gossipValidationHelper = gossipValidationHelper;
   }
 
   public SafeFuture<InternalValidationResult> validate(final SignedContributionAndProof proof) {
+    return validate(proof, false);
+  }
+
+  /**
+   * @param producedLocally whether the contribution comes from one of this node's own validators,
+   *     in which case its signatures are verified without waiting for a batch
+   */
+  public SafeFuture<InternalValidationResult> validate(
+      final SignedContributionAndProof proof, final boolean producedLocally) {
     final ContributionAndProof contributionAndProof = proof.getMessage();
     final SyncCommitteeContribution contribution = contributionAndProof.getContribution();
 
@@ -147,7 +178,8 @@ public class SignedContributionAndProofValidator {
                   syncCommitteeUtil,
                   sourceUniquenessKey,
                   targetUniquenessKey,
-                  maybeState.get());
+                  maybeState.get(),
+                  producedLocally ? urgentSignatureVerifier : signatureVerifier);
             });
   }
 
@@ -164,7 +196,8 @@ public class SignedContributionAndProofValidator {
       final SyncCommitteeUtil syncCommitteeUtil,
       final SourceUniquenessKey sourceUniquenessKey,
       final TargetUniquenessKey targetUniquenessKey,
-      final BeaconStateAltair state) {
+      final BeaconStateAltair state,
+      final AsyncBLSSignatureVerifier asyncSignatureVerifier) {
     final BeaconStateAccessors beaconStateAccessors =
         spec.atSlot(contribution.getSlot()).beaconStateAccessors();
 
@@ -202,7 +235,7 @@ public class SignedContributionAndProofValidator {
     }
 
     final AsyncBatchBLSSignatureVerifier signatureVerifier =
-        new AsyncBatchBLSSignatureVerifier(this.signatureVerifier);
+        new AsyncBatchBLSSignatureVerifier(asyncSignatureVerifier);
 
     final ForkInfo contributionSignatureForkInfo =
         new ForkInfo(

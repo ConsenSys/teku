@@ -23,8 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -428,5 +430,66 @@ public abstract class BLSTest {
     final Bytes message = Bytes.wrap("Hello, world!".getBytes(UTF_8));
     final BLSSignature signature = BLS.sign(keyPair.getSecretKey(), message, dst);
     assertFalse(BLS.verify(keyPair.getPublicKey(), message, signature)); // uses ETH2_DST
+  }
+
+  @Test
+  void batchVerifyManySignaturesOverTheSameMessage() {
+    final Bytes message = Bytes.wrap("Hello, same message!".getBytes(UTF_8));
+    final List<BLSKeyPair> keyPairs =
+        IntStream.range(0, 40).mapToObj(BLSTestUtil::randomKeyPair).toList();
+    final List<List<BLSPublicKey>> publicKeys =
+        keyPairs.stream().map(kp -> List.of(kp.getPublicKey())).toList();
+    final List<Bytes> messages = Collections.nCopies(keyPairs.size(), message);
+    final List<BLSSignature> signatures =
+        keyPairs.stream().map(kp -> BLS.sign(kp.getSecretKey(), message)).toList();
+
+    assertTrue(BLS.batchVerify(publicKeys, messages, signatures));
+    assertTrue(BLS.batchVerify(publicKeys, messages, signatures, true, false));
+    assertTrue(BLS.batchVerify(publicKeys, messages, signatures, false, false));
+    assertTrue(BLS.batchVerify(publicKeys, messages, signatures, false, true));
+
+    // Replace one signature with a signature over a different message
+    final List<BLSSignature> tampered = new ArrayList<>(signatures);
+    tampered.set(
+        17, BLS.sign(keyPairs.get(17).getSecretKey(), Bytes.wrap("other".getBytes(UTF_8))));
+
+    assertFalse(BLS.batchVerify(publicKeys, messages, tampered));
+    assertFalse(BLS.batchVerify(publicKeys, messages, tampered, true, false));
+    assertFalse(BLS.batchVerify(publicKeys, messages, tampered, false, false));
+    assertFalse(BLS.batchVerify(publicKeys, messages, tampered, false, true));
+  }
+
+  @Test
+  void batchVerifyMixOfRepeatedAndDistinctMessages() {
+    final Bytes m1 = Bytes.wrap("m1".getBytes(UTF_8));
+    final Bytes m2 = Bytes.wrap("m2".getBytes(UTF_8));
+    final Bytes m3 = Bytes.wrap("m3".getBytes(UTF_8));
+    final Bytes m4 = Bytes.wrap("m4".getBytes(UTF_8));
+    // m1 x3, m2 x2, m3 x1, m4 x1 interleaved so grouping has to reorder
+    final List<Bytes> messages = List.of(m1, m2, m3, m1, m4, m2, m1);
+    final List<BLSKeyPair> keyPairs =
+        IntStream.range(100, 100 + messages.size()).mapToObj(BLSTestUtil::randomKeyPair).toList();
+    final List<List<BLSPublicKey>> publicKeys =
+        keyPairs.stream().map(kp -> List.of(kp.getPublicKey())).toList();
+    final List<BLSSignature> signatures =
+        IntStream.range(0, messages.size())
+            .mapToObj(i -> BLS.sign(keyPairs.get(i).getSecretKey(), messages.get(i)))
+            .toList();
+
+    for (final boolean doublePairing : List.of(true, false)) {
+      for (final boolean parallel : List.of(true, false)) {
+        assertTrue(BLS.batchVerify(publicKeys, messages, signatures, doublePairing, parallel));
+
+        // invalid signature inside a repeated-message group
+        final List<BLSSignature> badInGroup = new ArrayList<>(signatures);
+        badInGroup.set(3, BLS.sign(keyPairs.get(3).getSecretKey(), m2));
+        assertFalse(BLS.batchVerify(publicKeys, messages, badInGroup, doublePairing, parallel));
+
+        // invalid signature for a message that appears only once
+        final List<BLSSignature> badSingle = new ArrayList<>(signatures);
+        badSingle.set(4, BLS.sign(keyPairs.get(4).getSecretKey(), m1));
+        assertFalse(BLS.batchVerify(publicKeys, messages, badSingle, doublePairing, parallel));
+      }
+    }
   }
 }

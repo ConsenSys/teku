@@ -17,8 +17,11 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Streams;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.stream.IntStream;
+import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -290,46 +293,64 @@ public class BLS {
       if (count == 0) {
         return false;
       }
-      if (doublePairing) {
-        Stream<List<Integer>> pairsStream =
-            Lists.partition(IntStream.range(0, count).boxed().toList(), 2).stream();
 
-        if (parallel) {
-          pairsStream = pairsStream.parallel();
-        }
-        return completeBatchVerify(
-            pairsStream
-                .map(
-                    idx ->
-                        idx.size() == 1
-                            ? prepareBatchVerify(
-                                idx.get(0),
-                                publicKeys.get(idx.get(0)),
-                                messages.get(idx.get(0)),
-                                signatures.get(idx.get(0)))
-                            : prepareBatchVerify2(
-                                idx.get(0),
-                                publicKeys.get(idx.get(0)),
-                                messages.get(idx.get(0)),
-                                signatures.get(idx.get(0)),
-                                publicKeys.get(idx.get(1)),
-                                messages.get(idx.get(1)),
-                                signatures.get(idx.get(1))))
-                .toList());
-      } else {
-        Stream<Integer> indexStream = IntStream.range(0, count).boxed();
-
-        if (parallel) {
-          indexStream = indexStream.parallel();
-        }
-        return completeBatchVerify(
-            indexStream
-                .map(
-                    idx ->
-                        prepareBatchVerify(
-                            idx, publicKeys.get(idx), messages.get(idx), signatures.get(idx)))
-                .toList());
+      // Signatures over the same message (e.g. attestations with the same AttestationData) are
+      // grouped so that the message is hashed to G2 and paired only once per distinct message.
+      final Map<Bytes, List<Integer>> indicesByMessage = new LinkedHashMap<>();
+      for (int i = 0; i < count; i++) {
+        indicesByMessage.computeIfAbsent(messages.get(i), __ -> new ArrayList<>()).add(i);
       }
+      final List<Integer> singleIndices = new ArrayList<>();
+      final List<Supplier<BatchSemiAggregate>> work = new ArrayList<>();
+      for (final List<Integer> group : indicesByMessage.values()) {
+        if (group.size() == 1) {
+          singleIndices.add(group.get(0));
+        } else {
+          work.add(
+              () ->
+                  prepareBatchVerifySameMessage(
+                      group.get(0),
+                      group.stream().map(publicKeys::get).toList(),
+                      messages.get(group.get(0)),
+                      group.stream().map(signatures::get).toList(),
+                      parallel));
+        }
+      }
+
+      if (doublePairing) {
+        for (final List<Integer> idx : Lists.partition(singleIndices, 2)) {
+          work.add(
+              idx.size() == 1
+                  ? () ->
+                      prepareBatchVerify(
+                          idx.get(0),
+                          publicKeys.get(idx.get(0)),
+                          messages.get(idx.get(0)),
+                          signatures.get(idx.get(0)))
+                  : () ->
+                      prepareBatchVerify2(
+                          idx.get(0),
+                          publicKeys.get(idx.get(0)),
+                          messages.get(idx.get(0)),
+                          signatures.get(idx.get(0)),
+                          publicKeys.get(idx.get(1)),
+                          messages.get(idx.get(1)),
+                          signatures.get(idx.get(1))));
+        }
+      } else {
+        for (final Integer idx : singleIndices) {
+          work.add(
+              () ->
+                  prepareBatchVerify(
+                      idx, publicKeys.get(idx), messages.get(idx), signatures.get(idx)));
+        }
+      }
+
+      Stream<Supplier<BatchSemiAggregate>> workStream = work.stream();
+      if (parallel) {
+        workStream = workStream.parallel();
+      }
+      return completeBatchVerify(workStream.map(Supplier::get).toList());
     } catch (IllegalArgumentException e) {
       throw new BlsException("Failed to batchVerify", e);
     }
@@ -362,6 +383,34 @@ public class BLS {
               publicKeys.stream().map(BLSPublicKey::getPublicKey).toList(),
               message,
               signature.getSignature());
+    } catch (BlsException e) {
+      return new InvalidBatchSemiAggregate();
+    }
+  }
+
+  /**
+   * Variant of {@link #prepareBatchVerify(int, List, Bytes, BLSSignature)} for several signatures
+   * over the same message: the message is hashed to the curve and paired only once.
+   *
+   * <p>The returned instances can be mixed up with the instances returned by {@link
+   * #prepareBatchVerify(int, List, Bytes, BLSSignature)}
+   */
+  private static BatchSemiAggregate prepareBatchVerifySameMessage(
+      final int index,
+      final List<List<BLSPublicKey>> publicKeys,
+      final Bytes message,
+      final List<BLSSignature> signatures,
+      final boolean parallel) {
+    try {
+      return getBlsImpl()
+          .prepareBatchVerifySameMessage(
+              index,
+              publicKeys.stream()
+                  .map(keys -> keys.stream().map(BLSPublicKey::getPublicKey).toList())
+                  .toList(),
+              message,
+              signatures.stream().map(BLSSignature::getSignature).toList(),
+              parallel);
     } catch (BlsException e) {
       return new InvalidBatchSemiAggregate();
     }

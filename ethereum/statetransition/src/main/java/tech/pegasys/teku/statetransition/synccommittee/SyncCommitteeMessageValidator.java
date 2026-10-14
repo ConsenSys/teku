@@ -49,6 +49,7 @@ public class SyncCommitteeMessageValidator {
   private final Spec spec;
   private final SyncCommitteeStateUtils syncCommitteeStateUtils;
   private final AsyncBLSSignatureVerifier signatureVerifier;
+  private final AsyncBLSSignatureVerifier urgentSignatureVerifier;
   private final GossipValidationHelper gossipValidationHelper;
 
   private final RecentChainData recentChainData;
@@ -59,9 +60,30 @@ public class SyncCommitteeMessageValidator {
       final SyncCommitteeStateUtils syncCommitteeStateUtils,
       final AsyncBLSSignatureVerifier signatureVerifier,
       final GossipValidationHelper gossipValidationHelper) {
+    this(
+        spec,
+        recentChainData,
+        syncCommitteeStateUtils,
+        signatureVerifier,
+        signatureVerifier,
+        gossipValidationHelper);
+  }
+
+  /**
+   * @param urgentSignatureVerifier used for messages produced by this node's own validators, which
+   *     must not be held back by batching delays before they are broadcast
+   */
+  public SyncCommitteeMessageValidator(
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final SyncCommitteeStateUtils syncCommitteeStateUtils,
+      final AsyncBLSSignatureVerifier signatureVerifier,
+      final AsyncBLSSignatureVerifier urgentSignatureVerifier,
+      final GossipValidationHelper gossipValidationHelper) {
     this.spec = spec;
     this.syncCommitteeStateUtils = syncCommitteeStateUtils;
     this.signatureVerifier = signatureVerifier;
+    this.urgentSignatureVerifier = urgentSignatureVerifier;
     this.gossipValidationHelper = gossipValidationHelper;
     this.recentChainData = recentChainData;
   }
@@ -200,7 +222,12 @@ public class SyncCommitteeMessageValidator {
     /*
      * [REJECT] The signature is valid
      */
-    return signatureVerifier
+    // Messages from this node's own validators carry no subnet id and must not wait for a batch
+    final AsyncBLSSignatureVerifier verifier =
+        validatableMessage.getReceivedSubnetId().isEmpty()
+            ? urgentSignatureVerifier
+            : signatureVerifier;
+    return verifier
         .verify(maybeValidatorPublicKey.get(), signingRoot, message.getSignature())
         .thenApply(
             signatureValid -> {

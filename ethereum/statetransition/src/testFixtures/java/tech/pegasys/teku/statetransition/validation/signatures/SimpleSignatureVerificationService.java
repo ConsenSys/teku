@@ -19,8 +19,14 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 
 public class SimpleSignatureVerificationService extends SignatureVerificationService {
+  @Override
+  public AsyncBLSSignatureVerifier urgent() {
+    return this;
+  }
+
   @Override
   public SafeFuture<Boolean> verify(
       final List<BLSPublicKey> publicKeys, final Bytes message, final BLSSignature signature) {

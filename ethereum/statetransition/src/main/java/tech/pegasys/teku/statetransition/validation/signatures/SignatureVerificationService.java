@@ -17,4 +17,12 @@ import tech.pegasys.teku.service.serviceutils.Service;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 
 public abstract class SignatureVerificationService extends Service
-    implements AsyncBLSSignatureVerifier {}
+    implements AsyncBLSSignatureVerifier {
+
+  /**
+   * A view of this service for signatures the node must verify as soon as possible, e.g. messages
+   * produced by its own validators that are waiting to be broadcast. Implementations that batch
+   * verifications must not hold such a signature back while gathering a larger batch.
+   */
+  public abstract AsyncBLSSignatureVerifier urgent();
+}

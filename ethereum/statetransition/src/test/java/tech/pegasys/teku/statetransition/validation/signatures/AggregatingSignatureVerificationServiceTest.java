@@ -24,6 +24,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -40,6 +44,7 @@ import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunnerFactory;
 import tech.pegasys.teku.infrastructure.async.Waiter;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.statetransition.validation.signatures.AggregatingSignatureVerificationService.SignatureTask;
 
@@ -51,6 +56,8 @@ public class AggregatingSignatureVerificationServiceTest {
   private final int minBatchSizeToSplit = 5;
   private final int numThreads = 2;
   private final boolean strictThreadLimitEnabled = true;
+  private final Duration batchGatherTimeout = Duration.ofMillis(10);
+  private final int batchGatherTargetSize = 64;
   private final StubAsyncRunner completionRunner = new StubAsyncRunner();
 
   private final StubAsyncRunnerFactory asyncRunnerFactory = new StubAsyncRunnerFactory();
@@ -63,7 +70,9 @@ public class AggregatingSignatureVerificationServiceTest {
           queueCapacity,
           batchSize,
           minBatchSizeToSplit,
-          strictThreadLimitEnabled);
+          strictThreadLimitEnabled,
+          batchGatherTimeout,
+          batchGatherTargetSize);
 
   @Test
   public void start_shouldQueueTasks() {
@@ -252,7 +261,9 @@ public class AggregatingSignatureVerificationServiceTest {
             queueCapacity,
             batchSize,
             minBatchSizeToSplit,
-            strictThreadLimitEnabled);
+            strictThreadLimitEnabled,
+            batchGatherTimeout,
+            batchGatherTargetSize);
     startService();
 
     final Random random = new Random(1);
@@ -321,7 +332,9 @@ public class AggregatingSignatureVerificationServiceTest {
             queueCapacity,
             batchSize,
             minBatchSizeToSplit,
-            strictThreadLimitEnabled);
+            strictThreadLimitEnabled,
+            batchGatherTimeout,
+            batchGatherTargetSize);
     startService();
 
     // Mismatched public key / message / signature list sizes make the underlying BLS batch
@@ -391,6 +404,186 @@ public class AggregatingSignatureVerificationServiceTest {
 
     assertThat(split.size()).isEqualTo(1);
     assertThat(split.get(0).size()).isEqualTo(1);
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void waitForBatch_gathersTasksArrivingWithinTheGatherWindow() throws Exception {
+    service = createServiceWithGathering(Duration.ofMillis(500), 10);
+    startService();
+    executeValidVerify(0, 0);
+
+    final CompletableFuture<List<SignatureTask>> batch =
+        CompletableFuture.supplyAsync(service::waitForBatch);
+    Thread.sleep(100);
+    executeValidVerify(1, 1);
+    executeValidVerify(2, 2);
+
+    assertThat(batch.get(5, TimeUnit.SECONDS)).hasSize(3);
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void waitForBatch_stopsGatheringOnceTargetSizeIsReached() throws Exception {
+    service = createServiceWithGathering(Duration.ofSeconds(10), 3);
+    startService();
+    executeValidVerify(0, 0);
+
+    final long start = System.nanoTime();
+    final CompletableFuture<List<SignatureTask>> batch =
+        CompletableFuture.supplyAsync(service::waitForBatch);
+    Thread.sleep(100);
+    executeValidVerify(1, 1);
+    executeValidVerify(2, 2);
+
+    assertThat(batch.get(5, TimeUnit.SECONDS)).hasSize(3);
+    // Returned as soon as the target was reached, well before the 10s gather timeout
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void waitForBatch_returnsAfterGatherTimeoutWhenTargetSizeNotReached() throws Exception {
+    service = createServiceWithGathering(Duration.ofMillis(200), 10);
+    startService();
+    executeValidVerify(0, 0);
+
+    final CompletableFuture<List<SignatureTask>> batch =
+        CompletableFuture.supplyAsync(service::waitForBatch);
+
+    assertThat(batch.get(5, TimeUnit.SECONDS)).hasSize(1);
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void waitForBatch_onlyOneWorkerGathersAtATime() throws Exception {
+    service = createServiceWithGathering(Duration.ofMillis(500), 10);
+    startService();
+    executeValidVerify(0, 0);
+
+    final ExecutorService workers = Executors.newFixedThreadPool(2);
+    try {
+      final Future<List<SignatureTask>> worker1 = workers.submit(service::waitForBatch);
+      final Future<List<SignatureTask>> worker2 = workers.submit(service::waitForBatch);
+      Thread.sleep(100);
+      for (int i = 1; i < 5; i++) {
+        executeValidVerify(i, i);
+      }
+
+      Waiter.waitFor(() -> assertThat(worker1.isDone() || worker2.isDone()).isTrue());
+      final Future<List<SignatureTask>> gatherer = worker1.isDone() ? worker1 : worker2;
+      final Future<List<SignatureTask>> other = worker1.isDone() ? worker2 : worker1;
+      // The gathering worker collected everything that arrived in its window and the other worker
+      // did not steal any of the tasks: it is still waiting for the next batch
+      assertThat(gatherer.get()).hasSize(5);
+      assertThat(other).isNotDone();
+    } finally {
+      workers.shutdownNow();
+    }
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void waitForBatch_urgentTaskArrivingMidGatherEndsTheGather() throws Exception {
+    service = createServiceWithGathering(Duration.ofSeconds(10), 10);
+    startService();
+    executeValidVerify(0, 0);
+
+    final long start = System.nanoTime();
+    final CompletableFuture<List<SignatureTask>> batch =
+        CompletableFuture.supplyAsync(service::waitForBatch);
+    Thread.sleep(100);
+    executeUrgentValidVerify(1, 1);
+
+    assertThat(batch.get(5, TimeUnit.SECONDS)).hasSize(2);
+    // Returned as soon as the urgent task arrived, well before the 10s gather timeout
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void waitForBatch_doesNotGatherWhenAnUrgentTaskIsAlreadyQueued() throws Exception {
+    service = createServiceWithGathering(Duration.ofSeconds(10), 10);
+    startService();
+    executeValidVerify(0, 0);
+    executeUrgentValidVerify(1, 1);
+    executeValidVerify(2, 2);
+
+    final long start = System.nanoTime();
+    final List<SignatureTask> batch = service.waitForBatch();
+
+    assertThat(batch).hasSize(3);
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
+  }
+
+  @Test
+  public void urgent_verifiesAndCompletesLikeTheNormalVerifier() {
+    startService();
+    final SafeFuture<Boolean> valid = executeUrgentValidVerify(0, 0);
+    final SafeFuture<Boolean> invalid = executeUrgentVerify(1, 1, false);
+
+    assertThat(valid).isNotDone();
+    assertThat(invalid).isNotDone();
+    runPendingTasks();
+
+    assertThat(valid).isCompletedWithValue(true);
+    assertThat(invalid).isCompletedWithValue(false);
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void urgent_countsUrgentTasksInMetrics() {
+    final StubMetricsSystem metricsSystem = new StubMetricsSystem();
+    service =
+        new AggregatingSignatureVerificationService(
+            metricsSystem,
+            asyncRunnerFactory,
+            completionRunner,
+            numThreads,
+            queueCapacity,
+            batchSize,
+            minBatchSizeToSplit,
+            strictThreadLimitEnabled,
+            batchGatherTimeout,
+            batchGatherTargetSize);
+    startService();
+    executeUrgentValidVerify(0, 0);
+    executeValidVerify(1, 1);
+
+    assertThat(
+            metricsSystem.getCounterValue(
+                TekuMetricCategory.EXECUTOR, "signature_verifications_urgent_task_count_total"))
+        .isEqualTo(1);
+  }
+
+  private SafeFuture<Boolean> executeUrgentValidVerify(final int keypairIndex, final int data) {
+    return executeUrgentVerify(keypairIndex, data, true);
+  }
+
+  private SafeFuture<Boolean> executeUrgentVerify(
+      final int keypairIndex, final int data, final boolean useValidSignature) {
+    final BLSKeyPair keypair = KEYS.get(keypairIndex);
+    final Bytes message = Bytes.of(data);
+    final BLSSignature signature =
+        useValidSignature ? BLS.sign(keypair.getSecretKey(), message) : BLSSignature.empty();
+    return service.urgent().verify(keypair.getPublicKey(), message, signature);
+  }
+
+  private AggregatingSignatureVerificationService createServiceWithGathering(
+      final Duration gatherTimeout, final int gatherTargetSize) {
+    // Stub runner factory: worker threads are never actually started so only the explicit
+    // waitForBatch calls in the test consume the queue
+    return new AggregatingSignatureVerificationService(
+        new StubMetricsSystem(),
+        asyncRunnerFactory,
+        completionRunner,
+        numThreads,
+        queueCapacity,
+        batchSize,
+        minBatchSizeToSplit,
+        strictThreadLimitEnabled,
+        gatherTimeout,
+        gatherTargetSize);
   }
 
   private void startService() {

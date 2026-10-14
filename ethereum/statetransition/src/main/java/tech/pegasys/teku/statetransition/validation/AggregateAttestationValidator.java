@@ -57,14 +57,28 @@ public class AggregateAttestationValidator {
   private final AttestationValidator attestationValidator;
   private final Spec spec;
   private final AsyncBLSSignatureVerifier signatureVerifier;
+  private final AsyncBLSSignatureVerifier urgentSignatureVerifier;
 
   public AggregateAttestationValidator(
       final Spec spec,
       final AttestationValidator attestationValidator,
       final AsyncBLSSignatureVerifier signatureVerifier) {
+    this(spec, attestationValidator, signatureVerifier, signatureVerifier);
+  }
+
+  /**
+   * @param urgentSignatureVerifier used for aggregates produced by this node's own validators,
+   *     which must not be held back by batching delays before they are broadcast
+   */
+  public AggregateAttestationValidator(
+      final Spec spec,
+      final AttestationValidator attestationValidator,
+      final AsyncBLSSignatureVerifier signatureVerifier,
+      final AsyncBLSSignatureVerifier urgentSignatureVerifier) {
     this.attestationValidator = attestationValidator;
     this.spec = spec;
     this.signatureVerifier = signatureVerifier;
+    this.urgentSignatureVerifier = urgentSignatureVerifier;
   }
 
   public void addSeenAggregate(final ValidatableAttestation attestation) {
@@ -133,7 +147,8 @@ public class AggregateAttestationValidator {
       final SpecVersion specVersion,
       final AggregatorIndexAndEpoch aggregatorIndexAndEpoch) {
     final AsyncBatchBLSSignatureVerifier signatureVerifier =
-        new AsyncBatchBLSSignatureVerifier(this.signatureVerifier);
+        new AsyncBatchBLSSignatureVerifier(
+            attestation.isProducedLocally() ? urgentSignatureVerifier : this.signatureVerifier);
     return singleOrAggregateAttestationChecks(signatureVerifier, attestation, OptionalInt.empty())
         .thenCompose(
             resultWithState -> {

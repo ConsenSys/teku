@@ -17,11 +17,13 @@ import static java.util.Collections.singletonList;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -37,23 +39,35 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.MetricsQuantileHistogram;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
+import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 
 public class AggregatingSignatureVerificationService extends SignatureVerificationService {
   private static final Logger LOG = LogManager.getLogger();
 
   static final int DEFAULT_MIN_BATCH_SIZE_TO_SPLIT = 25;
 
+  private static final Duration IDLE_POLL_TIMEOUT = Duration.ofSeconds(30);
+  private static final Duration GATHER_LOCK_TIMEOUT = Duration.ofSeconds(1);
+
   private final AsyncRunner completionRunner;
   private final int numThreads;
   private final int maxBatchSize;
   private final int minBatchSizeToSplit;
   private final boolean strictThreadLimitEnabled;
+  private final long batchGatherTimeoutNanos;
+  private final int batchGatherTargetSize;
 
   @VisibleForTesting final BlockingQueue<SignatureTask> batchSignatureTasks;
+  // Only one worker gathers a batch at a time, otherwise tasks arriving during the gather window
+  // would be spread one-by-one across all idle workers instead of forming a single batch
+  private final ReentrantLock gatherLock = new ReentrantLock();
   private final AsyncRunner asyncRunner;
   private final Counter batchCounter;
   private final Counter taskCounter;
+  private final Counter urgentTaskCounter;
   private final MetricsQuantileHistogram batchSizeHistogram;
+  private final MetricsQuantileHistogram batchGatherTimeHistogram;
+  private final AsyncBLSSignatureVerifier urgentView = new UrgentView();
 
   @VisibleForTesting
   AggregatingSignatureVerificationService(
@@ -64,7 +78,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final int queueCapacity,
       final int maxBatchSize,
       final int minBatchSizeToSplit,
-      final boolean strictThreadLimitEnabled) {
+      final boolean strictThreadLimitEnabled,
+      final Duration batchGatherTimeout,
+      final int batchGatherTargetSize) {
     this.numThreads = Math.min(numThreads, Runtime.getRuntime().availableProcessors());
     this.asyncRunner = asyncRunnerFactory.create(this.getClass().getSimpleName(), this.numThreads);
     this.completionRunner = completionRunner;
@@ -73,6 +89,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     this.batchSignatureTasks = new ArrayBlockingQueue<>(queueCapacity);
     this.minBatchSizeToSplit = minBatchSizeToSplit;
     this.strictThreadLimitEnabled = strictThreadLimitEnabled;
+    this.batchGatherTimeoutNanos = batchGatherTimeout.toNanos();
+    this.batchGatherTargetSize = batchGatherTargetSize;
     metricsSystem.createGauge(
         TekuMetricCategory.EXECUTOR,
         "signature_verifications_queue_size",
@@ -88,12 +106,27 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
             TekuMetricCategory.EXECUTOR,
             "signature_verifications_task_count_total",
             "Reports the number of individual verification tasks processed");
+    urgentTaskCounter =
+        metricsSystem.createCounter(
+            TekuMetricCategory.EXECUTOR,
+            "signature_verifications_urgent_task_count_total",
+            "Reports the number of verification tasks submitted as urgent (not held back while"
+                + " gathering a batch)");
     batchSizeHistogram =
         MetricsQuantileHistogram.create(
             TekuMetricCategory.EXECUTOR,
             metricsSystem,
             "signature_verifications_batch_size",
             "Histogram of signature verification batch sizes",
+            3,
+            List.of());
+    batchGatherTimeHistogram =
+        MetricsQuantileHistogram.create(
+            TekuMetricCategory.EXECUTOR,
+            metricsSystem,
+            "signature_verifications_batch_gather_time_micros",
+            "Histogram of the time spent gathering a batch after its first task was taken, in"
+                + " microseconds",
             3,
             List.of());
   }
@@ -105,7 +138,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final int maxThreads,
       final int queueCapacity,
       final int maxBatchSize,
-      final boolean strictThreadLimitEnabled) {
+      final boolean strictThreadLimitEnabled,
+      final Duration batchGatherTimeout,
+      final int batchGatherTargetSize) {
     this(
         metricsSystem,
         asyncRunnerFactory,
@@ -114,7 +149,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
         queueCapacity,
         maxBatchSize,
         DEFAULT_MIN_BATCH_SIZE_TO_SPLIT,
-        strictThreadLimitEnabled);
+        strictThreadLimitEnabled,
+        batchGatherTimeout,
+        batchGatherTargetSize);
   }
 
   @Override
@@ -147,9 +184,25 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final List<List<BLSPublicKey>> publicKeys,
       final List<Bytes> messages,
       final List<BLSSignature> signatures) {
+    return submit(publicKeys, messages, signatures, false);
+  }
+
+  @Override
+  public AsyncBLSSignatureVerifier urgent() {
+    return urgentView;
+  }
+
+  private SafeFuture<Boolean> submit(
+      final List<List<BLSPublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<BLSSignature> signatures,
+      final boolean urgent) {
     assertIsRunning("verify");
+    if (urgent) {
+      urgentTaskCounter.inc();
+    }
     final SignatureTask task =
-        new SignatureTask(completionRunner, publicKeys, messages, signatures);
+        new SignatureTask(completionRunner, publicKeys, messages, signatures, urgent);
     if (!batchSignatureTasks.offer(task)) {
       // Queue is full
       final Throwable error =
@@ -195,16 +248,50 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     }
   }
 
-  private List<SignatureTask> waitForBatch() {
+  @VisibleForTesting
+  List<SignatureTask> waitForBatch() {
     final List<SignatureTask> tasks = new ArrayList<>();
     try {
-      int batchSize = maxBatchSize;
-      final SignatureTask firstTask = batchSignatureTasks.poll(30, TimeUnit.SECONDS);
-      if (firstTask != null) {
-        tasks.add(firstTask);
-        batchSize -= 1;
+      if (!gatherLock.tryLock(GATHER_LOCK_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS)) {
+        // Let the caller re-check whether the service is still running
+        return tasks;
       }
-      batchSignatureTasks.drainTo(tasks, batchSize);
+      try {
+        final SignatureTask firstTask =
+            batchSignatureTasks.poll(IDLE_POLL_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+        if (firstTask == null) {
+          return tasks;
+        }
+        final long gatherStart = System.nanoTime();
+        tasks.add(firstTask);
+        batchSignatureTasks.drainTo(tasks, maxBatchSize - tasks.size());
+        int urgentScanIndex = 0;
+
+        // Keep gathering for a short while so that a steady trickle of tasks forms a real batch,
+        // unless an urgent task is already in hand: those must not be held back
+        final long deadline = gatherStart + batchGatherTimeoutNanos;
+        while (tasks.size() < batchGatherTargetSize && tasks.size() < maxBatchSize) {
+          if (containsUrgentTask(tasks, urgentScanIndex)) {
+            break;
+          }
+          urgentScanIndex = tasks.size();
+          final long remainingNanos = deadline - System.nanoTime();
+          if (remainingNanos <= 0) {
+            break;
+          }
+          final SignatureTask nextTask =
+              batchSignatureTasks.poll(remainingNanos, TimeUnit.NANOSECONDS);
+          if (nextTask == null) {
+            break;
+          }
+          tasks.add(nextTask);
+          batchSignatureTasks.drainTo(tasks, maxBatchSize - tasks.size());
+        }
+        batchGatherTimeHistogram.recordValue(
+            TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - gatherStart));
+      } finally {
+        gatherLock.unlock();
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
@@ -263,6 +350,33 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     return batchSignatureTasks.size();
   }
 
+  private static boolean containsUrgentTask(final List<SignatureTask> tasks, final int fromIndex) {
+    for (int i = fromIndex; i < tasks.size(); i++) {
+      if (tasks.get(i).urgent) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Submits every verification as urgent. */
+  private class UrgentView implements AsyncBLSSignatureVerifier {
+    @Override
+    public SafeFuture<Boolean> verify(
+        final List<BLSPublicKey> publicKeys, final Bytes message, final BLSSignature signature) {
+      return submit(
+          singletonList(publicKeys), singletonList(message), singletonList(signature), true);
+    }
+
+    @Override
+    public SafeFuture<Boolean> verify(
+        final List<List<BLSPublicKey>> publicKeys,
+        final List<Bytes> messages,
+        final List<BLSSignature> signatures) {
+      return submit(publicKeys, messages, signatures, true);
+    }
+  }
+
   @VisibleForTesting
   static class SignatureTask {
     final SafeFuture<Boolean> result = new SafeFuture<>();
@@ -270,16 +384,19 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     final List<List<BLSPublicKey>> publicKeys;
     final List<Bytes> messages;
     final List<BLSSignature> signatures;
+    final boolean urgent;
 
     private SignatureTask(
         final AsyncRunner asyncRunner,
         final List<List<BLSPublicKey>> publicKeys,
         final List<Bytes> messages,
-        final List<BLSSignature> signatures) {
+        final List<BLSSignature> signatures,
+        final boolean urgent) {
       this.asyncRunner = asyncRunner;
       this.publicKeys = publicKeys;
       this.messages = messages;
       this.signatures = signatures;
+      this.urgent = urgent;
     }
 
     public void completeAsync(final boolean isValid) {

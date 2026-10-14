@@ -62,6 +62,7 @@ import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.validation.signatures.RecordingSignatureVerifier;
 import tech.pegasys.teku.storage.client.ChainUpdater;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
@@ -717,5 +718,36 @@ class AggregateAttestationValidatorTest {
       final AttestationSchema<?> attestationSchema, final UInt64 committeeIndex) {
     return () ->
         attestationSchema.getCommitteeBitsSchema().orElseThrow().ofBits(committeeIndex.intValue());
+  }
+
+  @TestTemplate
+  public void shouldUseUrgentVerifierOnlyForLocallyProducedAggregates() {
+    final StateAndBlockSummary chainHead = storageSystem.getChainHead();
+    final SignedAggregateAndProof aggregate = generator.validAggregateAndProof(chainHead);
+    final BeaconState state = getStateFor(aggregate).orElseThrow();
+    when(attestationValidator.singleOrAggregateAttestationChecks(
+            any(), any(), eq(OptionalInt.empty())))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResultWithState.accept(state)));
+
+    final RecordingSignatureVerifier localNormal = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier localUrgent = new RecordingSignatureVerifier();
+    final AggregateAttestationValidator localValidator =
+        new AggregateAttestationValidator(spec, attestationValidator, localNormal, localUrgent);
+    assertThat(
+            localValidator.validate(ValidatableAttestation.aggregateFromValidator(spec, aggregate)))
+        .isCompletedWithValue(InternalValidationResult.ACCEPT);
+    assertThat(localUrgent.getVerifyCount()).isEqualTo(1);
+    assertThat(localNormal.getVerifyCount()).isZero();
+
+    // Fresh validator so the seen-aggregate caches do not short-circuit the second validation
+    final RecordingSignatureVerifier networkNormal = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier networkUrgent = new RecordingSignatureVerifier();
+    final AggregateAttestationValidator networkValidator =
+        new AggregateAttestationValidator(spec, attestationValidator, networkNormal, networkUrgent);
+    assertThat(
+            networkValidator.validate(ValidatableAttestation.aggregateFromNetwork(spec, aggregate)))
+        .isCompletedWithValue(InternalValidationResult.ACCEPT);
+    assertThat(networkNormal.getVerifyCount()).isEqualTo(1);
+    assertThat(networkUrgent.getVerifyCount()).isZero();
   }
 }

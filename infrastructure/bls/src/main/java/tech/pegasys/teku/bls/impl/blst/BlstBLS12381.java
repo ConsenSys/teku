@@ -13,16 +13,19 @@
 
 package tech.pegasys.teku.bls.impl.blst;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.bls.impl.blst.HashToCurve.ETH2_DST;
 
 import java.math.BigInteger;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import supranational.blst.BLST_ERROR;
+import supranational.blst.P1;
 import supranational.blst.P2;
 import supranational.blst.P2_Affine;
 import supranational.blst.Pairing;
@@ -156,6 +159,114 @@ public class BlstBLS12381 implements BLS12381 {
 
     aggregate1.mergeWith(aggregate2);
     return aggregate1;
+  }
+
+  @Override
+  public BlstSemiAggregate prepareBatchVerifySameMessage(
+      final int index,
+      final List<? extends List<? extends PublicKey>> publicKeys,
+      final Bytes message,
+      final List<? extends Signature> signatures,
+      final boolean parallel) {
+    checkArgument(
+        publicKeys.size() == signatures.size(),
+        "Different collection sizes: %s public key lists, %s signatures",
+        publicKeys.size(),
+        signatures.size());
+    checkArgument(!signatures.isEmpty(), "No signatures to verify");
+
+    IntStream indices = IntStream.range(0, signatures.size());
+    if (parallel) {
+      indices = indices.parallel();
+    }
+    // Mutable per-thread accumulators: the scaled points are added in place, so the only
+    // allocations per signature are the two scaled points themselves.
+    final ScaledSum sum =
+        indices.collect(
+            ScaledSum::new,
+            (acc, i) -> acc.add(scaleByRandomMultiplier(publicKeys.get(i), signatures.get(i))),
+            ScaledSum::combine);
+
+    if (!sum.isValid()) {
+      return BlstSemiAggregate.createInvalid();
+    }
+
+    final Pairing ctx = new Pairing(true, ETH2_DST);
+    final BLST_ERROR ret =
+        ctx.aggregate(sum.publicKey.to_affine(), sum.signature.to_affine(), message.toArray());
+
+    if (ret != BLST_ERROR.BLST_SUCCESS) {
+      if (ret == BLST_ERROR.BLST_PK_IS_INFINITY) {
+        return BlstSemiAggregate.createInvalid();
+      } else {
+        throw new BlsException("Error in Blst, error code: " + ret);
+      }
+    }
+
+    ctx.commit();
+
+    return new BlstSemiAggregate(ctx);
+  }
+
+  /**
+   * Multiplies the aggregated public key and the signature by the same fresh random scalar, so that
+   * summing several such pairs over the same message is still a sound randomised batch check.
+   */
+  private ScaledPair scaleByRandomMultiplier(
+      final List<? extends PublicKey> publicKeys, final Signature signature) {
+    final BlstPublicKey aggrPubKey = aggregatePublicKeys(publicKeys);
+    if (aggrPubKey.isInfinity()) {
+      return ScaledPair.INVALID;
+    }
+    final BlstSignature blstSignature = BlstSignature.fromSignature(signature);
+    if (!blstSignature.ec2Point.in_group()) {
+      throw new BlsException("Error in Blst, error code: " + BLST_ERROR.BLST_POINT_NOT_IN_GROUP);
+    }
+    final BigInteger multiplier = nextBatchRandomMultiplier();
+    return new ScaledPair(
+        new P1(aggrPubKey.ecPoint).mult(multiplier),
+        new P2(blstSignature.ec2Point).mult(multiplier));
+  }
+
+  /** A (public key, signature) pair scaled by the same random multiplier. */
+  private record ScaledPair(P1 publicKey, P2 signature) {
+    static final ScaledPair INVALID = new ScaledPair(null, null);
+
+    boolean isValid() {
+      return publicKey != null;
+    }
+  }
+
+  /**
+   * Running sum of {@link ScaledPair}s. Not thread-safe: each thread of a parallel stream gets its
+   * own instance and the instances are merged with {@link #combine}.
+   */
+  private static final class ScaledSum {
+    private final P1 publicKey = new P1();
+    private final P2 signature = new P2();
+    private boolean valid = true;
+
+    void add(final ScaledPair pair) {
+      if (!pair.isValid()) {
+        valid = false;
+        return;
+      }
+      publicKey.add(pair.publicKey());
+      signature.add(pair.signature());
+    }
+
+    void combine(final ScaledSum other) {
+      if (!other.valid) {
+        valid = false;
+        return;
+      }
+      publicKey.add(other.publicKey);
+      signature.add(other.signature);
+    }
+
+    boolean isValid() {
+      return valid;
+    }
   }
 
   @Override

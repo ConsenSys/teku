@@ -17,7 +17,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.IGNORE;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -41,6 +43,7 @@ import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
+import tech.pegasys.teku.statetransition.validation.signatures.RecordingSignatureVerifier;
 import tech.pegasys.teku.storage.client.ChainUpdater;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.server.StateStorageMode;
@@ -171,5 +174,39 @@ abstract class AbstractAttestationValidatorTest {
   protected boolean hasSameValidators(
       final Attestation attestation1, final Attestation attestation) {
     return attestation.getAggregationBits().equals(attestation1.getAggregationBits());
+  }
+
+  @Test
+  public void shouldUseUrgentVerifierOnlyForLocallyProducedAttestations() {
+    final RecordingSignatureVerifier normalVerifier = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier urgentVerifier = new RecordingSignatureVerifier();
+    final AttestationValidator validator =
+        new AttestationValidator(
+            spec,
+            normalVerifier,
+            urgentVerifier,
+            gossipValidationHelper,
+            invalidBlockRoots,
+            Set.of());
+    final StateAndBlockSummary block = chainUpdater.advanceChain(UInt64.ONE);
+    final UInt64 attestationSlot = UInt64.valueOf(2);
+    chainUpdater.setCurrentSlot(attestationSlot);
+    final List<Attestation> attestations =
+        attestationGenerator.streamAttestations(block, attestationSlot).limit(2).toList();
+
+    assertThat(validator.validate(ValidatableAttestation.fromValidator(spec, attestations.get(0))))
+        .isCompletedWithValue(InternalValidationResult.ACCEPT);
+    assertThat(urgentVerifier.getVerifyCount()).isEqualTo(1);
+    assertThat(normalVerifier.getVerifyCount()).isZero();
+
+    assertThat(
+            validator.validate(
+                ValidatableAttestation.fromNetwork(
+                    spec,
+                    attestations.get(1),
+                    spec.computeSubnetForAttestation(block.getState(), attestations.get(1)))))
+        .isCompletedWithValue(InternalValidationResult.ACCEPT);
+    assertThat(urgentVerifier.getVerifyCount()).isEqualTo(1);
+    assertThat(normalVerifier.getVerifyCount()).isEqualTo(1);
   }
 }

@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -940,5 +941,45 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration tekuConfiguration =
         getTekuConfigurationFromArguments("--Xmin-bid-increment-percentage=3");
     assertThat(tekuConfiguration.p2p().getMinBidIncrementPercentage()).isEqualTo(3);
+  }
+
+  @Test
+  public void shouldUseDefaultBatchVerifyGatherOptions() {
+    final P2PConfig config = getTekuConfigurationFromArguments().p2p();
+    assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(10));
+    assertThat(config.getBatchVerifyGatherTargetSize()).isEqualTo(64);
+  }
+
+  @Test
+  public void shouldSetBatchVerifyGatherOptions() {
+    final P2PConfig config =
+        getTekuConfigurationFromArguments(
+                "--Xp2p-batch-verify-signatures-gather-timeout-ms",
+                "5",
+                "--Xp2p-batch-verify-signatures-gather-target-size",
+                "32")
+            .p2p();
+    assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(5));
+    assertThat(config.getBatchVerifyGatherTargetSize()).isEqualTo(32);
+  }
+
+  @Test
+  public void shouldRejectNegativeBatchVerifyGatherTimeout() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-timeout-ms", "-1"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis");
+  }
+
+  @Test
+  public void shouldRejectZeroBatchVerifyGatherTargetSize() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-target-size", "0"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTargetSize");
   }
 }

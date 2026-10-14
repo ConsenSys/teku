@@ -576,6 +576,26 @@ public class P2POptions {
       P2PConfig.DEFAULT_BATCH_VERIFY_STRICT_THREAD_LIMIT_ENABLED;
 
   @Option(
+      names = {"--Xp2p-batch-verify-signatures-gather-timeout-ms"},
+      paramLabel = "<NUMBER>",
+      description =
+          "After the first task of a signature verification batch arrives, keep gathering tasks for"
+              + " up to this many milliseconds so that batches are large enough to amortise the"
+              + " pairing cost",
+      arity = "1",
+      hidden = true)
+  private int batchVerifyGatherTimeoutMillis = P2PConfig.DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS;
+
+  @Option(
+      names = {"--Xp2p-batch-verify-signatures-gather-target-size"},
+      paramLabel = "<NUMBER>",
+      description =
+          "Stop gathering a signature verification batch early once it holds this many tasks",
+      arity = "1",
+      hidden = true)
+  private int batchVerifyGatherTargetSize = P2PConfig.DEFAULT_BATCH_VERIFY_GATHER_TARGET_SIZE;
+
+  @Option(
       names = {"--p2p-discovery-site-local-addresses-enabled"},
       paramLabel = "<BOOLEAN>",
       showDefaultValue = Visibility.ALWAYS,
@@ -766,6 +786,8 @@ public class P2POptions {
                   .batchVerifyMaxThreads(batchVerifyMaxThreads)
                   .batchVerifyMaxBatchSize(batchVerifyMaxBatchSize)
                   .batchVerifyStrictThreadLimitEnabled(batchVerifyStrictThreadLimitEnabled)
+                  .batchVerifyGatherTimeoutMillis(batchVerifyGatherTimeoutMillis)
+                  .batchVerifyGatherTargetSize(batchVerifyGatherTargetSize)
                   .targetSubnetSubscriberCount(p2pTargetSubnetSubscriberCount)
                   .isGossipScoringEnabled(gossipScoringEnabled)
                   .peerBlocksRateLimit(peerBlocksRateLimit)
