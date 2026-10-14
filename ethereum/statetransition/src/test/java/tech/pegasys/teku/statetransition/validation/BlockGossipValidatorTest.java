@@ -14,61 +14,45 @@
 package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
 
-import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
-import java.util.function.UnaryOperator;
-import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.bls.BLSTestUtil;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.eventthread.InlineEventThread;
-import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
-import tech.pegasys.teku.spec.config.SpecConfigCapella;
-import tech.pegasys.teku.spec.config.SpecConfigElectra;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBuilder;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.BeaconBlockBodySchemaCapella;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyBuilderGloas;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodySchemaGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
-import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
-import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
-import tech.pegasys.teku.spec.datastructures.operations.Attestation;
-import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.Deposit;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
-import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
@@ -213,6 +197,145 @@ public class BlockGossipValidatorTest {
         SignedBeaconBlock.create(spec, block, blockSignature);
 
     assertThat(blockGossipValidator.validate(blockWithNoParent, true))
+        .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
+  }
+
+  @TestTemplate
+  void shouldRejectBlockFromFutureWithInvalidSignature() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(
+            spec,
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock().getMessage(),
+            BLSTestUtil.randomSignature(0));
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
+  void shouldRejectBlockWithParentUnavailableAndInvalidSignature() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final BeaconBlock blockWithUnknownParent =
+        createBlockWithUnknownParent(
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+            Optional.empty());
+
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(spec, blockWithUnknownParent, BLSTestUtil.randomSignature(0));
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
+  void shouldIgnoreBlockWithParentUnavailableAndProposerIndexBeyondHeadState() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final UInt64 unknownProposerIndex = UInt64.valueOf(1_000_000);
+    final BeaconBlock blockWithUnknownParent =
+        createBlockWithUnknownParent(
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+            Optional.of(unknownProposerIndex));
+
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(spec, blockWithUnknownParent, BLSTestUtil.randomSignature(0));
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(
+            InternalValidationResult.ignore(
+                "Block proposer index %s is not a known validator", unknownProposerIndex));
+  }
+
+  @TestTemplate
+  void shouldRejectInvalidSignatureWhenProposerIndexIsOnlyInHeadState() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(
+            spec,
+            createBlockWithUnknownParent(
+                storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+                Optional.empty()),
+            BLSTestUtil.randomSignature(0));
+
+    assertThat(validatorWithoutFinalizedValidators().validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
+  void shouldSaveForFutureWithValidSignatureWhenProposerIndexIsOnlyInHeadState() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final BeaconBlock blockWithUnknownParent =
+        createBlockWithUnknownParent(
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+            Optional.empty());
+    final BLSSignature signature =
+        storageSystem
+            .chainBuilder()
+            .getSigner(blockWithUnknownParent.getProposerIndex().intValue())
+            .signBlock(
+                blockWithUnknownParent,
+                storageSystem.chainBuilder().getLatestBlockAndState().getState().getForkInfo())
+            .join();
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(spec, blockWithUnknownParent, signature);
+
+    assertThat(validatorWithoutFinalizedValidators().validate(block, true))
+        .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
+  }
+
+  /**
+   * A validator whose latest finalized state has no validators, so every proposer is only in the
+   * head state.
+   */
+  private BlockGossipValidator validatorWithoutFinalizedValidators() {
+    final GossipValidationHelper gossipValidationHelper =
+        spy(new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()));
+    doReturn(new DataStructureUtil(spec).randomBeaconState(0))
+        .when(gossipValidationHelper)
+        .getLatestFinalizedState();
+    return new BlockGossipValidator(
+        spec, gossipValidationHelper, mock(ReceivedBlockEventsChannel.class));
+  }
+
+  @TestTemplate
+  void shouldVerifyFutureBlockSignatureWithForkOfBlockEpoch(final SpecContext specContext) {
+    specContext.assumeGloasActive();
+
+    final Spec forkTransitionSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(ONE);
+    final StorageSystem forkTransitionStorageSystem =
+        InMemoryStorageSystemBuilder.buildDefault(forkTransitionSpec);
+    forkTransitionStorageSystem.chainUpdater().initializeGenesis();
+    final BlockGossipValidator forkTransitionBlockGossipValidator =
+        new BlockGossipValidator(
+            forkTransitionSpec,
+            new GossipValidationHelper(
+                forkTransitionSpec,
+                forkTransitionStorageSystem.recentChainData(),
+                forkTransitionStorageSystem.getMetricsSystem()),
+            mock(ReceivedBlockEventsChannel.class));
+
+    final UInt64 firstGloasSlot = forkTransitionSpec.computeStartSlotAtEpoch(ONE);
+    final SignedBlockAndState preGloasHead =
+        forkTransitionStorageSystem.chainUpdater().advanceChain(firstGloasSlot.minus(ONE));
+    final SignedBeaconBlock firstGloasBlock =
+        forkTransitionStorageSystem.chainBuilder().generateBlockAtSlot(firstGloasSlot).getBlock();
+
+    // the head state's fork predates Gloas, so its signing domain would not verify the signature
+    assertThat(
+            BLS.verify(
+                forkTransitionSpec
+                    .getValidatorPubKey(preGloasHead.getState(), firstGloasBlock.getProposerIndex())
+                    .orElseThrow(),
+                new SigningRootUtil(forkTransitionSpec)
+                    .signingRootForSignBlock(
+                        firstGloasBlock.getMessage(), preGloasHead.getState().getForkInfo()),
+                firstGloasBlock.getSignature()))
+        .isFalse();
+    assertThat(forkTransitionBlockGossipValidator.validate(firstGloasBlock, true))
         .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
   }
 
@@ -562,6 +685,28 @@ public class BlockGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldRejectInvalidSignatureWhenParentFullPayloadIsNotAvailable(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+
+    final UInt64 parentSlot = recentChainData.getHeadSlot().plus(ONE);
+    final SignedBlockAndState parentBlockAndState =
+        storageSystem.chainBuilder().generateBlockAtSlot(parentSlot);
+    storageSystem.chainUpdater().saveBlock(parentBlockAndState);
+
+    final UInt64 childSlot = parentSlot.plus(ONE);
+    final SignedBeaconBlock childBlock =
+        SignedBeaconBlock.create(
+            spec,
+            storageSystem.chainBuilder().generateBlockAtSlot(childSlot).getBlock().getMessage(),
+            BLSTestUtil.randomSignature(0));
+    storageSystem.chainUpdater().setCurrentSlot(childSlot);
+
+    assertThat(blockGossipValidator.validate(childBlock, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
   void shouldSaveForFutureWhenParentFullPayloadHashAlsoMatchesLatestBlockHash(
       final SpecContext specContext) {
     specContext.assumeGloasActive();
@@ -766,402 +911,6 @@ public class BlockGossipValidatorTest {
                         badParentBlockRoot, signedBlockAndState.getBlock().getParentRoot())));
   }
 
-  @TestTemplate
-  void shouldRejectBlockWithTooManyProposerSlashings(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final int maxProposerSlashings = spec.atSlot(nextSlot).getConfig().getMaxProposerSlashings();
-    final SszList<ProposerSlashing> tooManyProposerSlashings =
-        specContext.getDataStructureUtil().randomProposerSlashings(maxProposerSlashings + 1, 100);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState, builder -> builder.proposerSlashings(tooManyProposerSlashings));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block has %d proposer slashings, max allowed %d",
-                        maxProposerSlashings + 1, maxProposerSlashings)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyAttesterSlashings(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final int maxAttesterSlashings =
-        SpecConfigElectra.required(spec.atSlot(nextSlot).getConfig())
-            .getMaxAttesterSlashingsElectra();
-    final SszList<AttesterSlashing> tooManyAttesterSlashings =
-        specContext.getDataStructureUtil().randomAttesterSlashings(maxAttesterSlashings + 1, 100);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState, builder -> builder.attesterSlashings(tooManyAttesterSlashings));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block has %d attester slashings, max allowed %d",
-                        maxAttesterSlashings + 1, maxAttesterSlashings)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyAttestations(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final int maxAttestations =
-        SpecConfigElectra.required(spec.atSlot(nextSlot).getConfig()).getMaxAttestationsElectra();
-    final SszList<Attestation> tooManyAttestations =
-        specContext.getDataStructureUtil().randomAttestations(maxAttestations + 1, nextSlot);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState, builder -> builder.attestations(tooManyAttestations));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block has %d attestations, max allowed %d",
-                        maxAttestations + 1, maxAttestations)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockContainingDeposits(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final SszList<Deposit> oneDeposit = specContext.getDataStructureUtil().randomSszDeposits(1);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(signedBlockAndState, builder -> builder.deposits(oneDeposit));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block must not contain deposits, found %d", 1)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyVoluntaryExits(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final int maxVoluntaryExits = spec.atSlot(nextSlot).getConfig().getMaxVoluntaryExits();
-    final SszList<SignedVoluntaryExit> tooManyVoluntaryExits =
-        specContext
-            .getDataStructureUtil()
-            .randomSszList(
-                BeaconBlockBodySchemaGloas.required(
-                        spec.atSlot(nextSlot).getSchemaDefinitions().getBeaconBlockBodySchema())
-                    .getVoluntaryExitsSchema(),
-                specContext.getDataStructureUtil()::randomSignedVoluntaryExit,
-                maxVoluntaryExits + 1);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState, builder -> builder.voluntaryExits(tooManyVoluntaryExits));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block has %d voluntary exits, max allowed %d",
-                        maxVoluntaryExits + 1, maxVoluntaryExits)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyBlsToExecutionChanges(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final int maxBlsToExecutionChanges =
-        SpecConfigCapella.required(spec.atSlot(nextSlot).getConfig()).getMaxBlsToExecutionChanges();
-    final SszList<SignedBlsToExecutionChange> tooManyBlsToExecutionChanges =
-        specContext
-            .getDataStructureUtil()
-            .randomSszList(
-                BeaconBlockBodySchemaCapella.required(
-                        spec.atSlot(nextSlot).getSchemaDefinitions().getBeaconBlockBodySchema())
-                    .getBlsToExecutionChangesSchema(),
-                specContext.getDataStructureUtil()::randomSignedBlsToExecutionChange,
-                maxBlsToExecutionChanges + 1);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState,
-            builder -> builder.blsToExecutionChanges(tooManyBlsToExecutionChanges));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block has %d bls to execution changes, max allowed %d",
-                        maxBlsToExecutionChanges + 1, maxBlsToExecutionChanges)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyPayloadAttestations(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final int maxPayloadAttestations =
-        SpecConfigGloas.required(spec.atSlot(nextSlot).getConfig()).getMaxPayloadAttestations();
-    final SszList<PayloadAttestation> tooManyPayloadAttestations =
-        specContext
-            .getDataStructureUtil()
-            .randomSszList(
-                BeaconBlockBodySchemaGloas.required(
-                        spec.atSlot(nextSlot).getSchemaDefinitions().getBeaconBlockBodySchema())
-                    .getPayloadAttestationsSchema(),
-                specContext.getDataStructureUtil()::randomPayloadAttestation,
-                maxPayloadAttestations + 1);
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState,
-            builder -> builder.payloadAttestations(tooManyPayloadAttestations));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Block has %d payload attestations, max allowed %d",
-                        maxPayloadAttestations + 1, maxPayloadAttestations)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyParentWithdrawalRequests(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final DataStructureUtil dataStructureUtil = specContext.getDataStructureUtil();
-    final int maxWithdrawalRequests =
-        SpecConfigElectra.required(spec.atSlot(nextSlot).getConfig())
-            .getMaxWithdrawalRequestsPerPayload();
-    final List<WithdrawalRequest> tooManyWithdrawalRequests =
-        IntStream.range(0, maxWithdrawalRequests + 1)
-            .mapToObj(__ -> dataStructureUtil.randomWithdrawalRequest())
-            .toList();
-    final ExecutionRequests tooManyParentExecutionRequests =
-        dataStructureUtil
-            .randomExecutionRequestsBuilder(nextSlot)
-            .withdrawals(tooManyWithdrawalRequests)
-            .build();
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState,
-            builder -> builder.parentExecutionRequests(tooManyParentExecutionRequests));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Parent execution requests has %d withdrawal requests, max allowed %d",
-                        maxWithdrawalRequests + 1, maxWithdrawalRequests)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyParentConsolidationRequests(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final DataStructureUtil dataStructureUtil = specContext.getDataStructureUtil();
-    final int maxConsolidationRequests =
-        SpecConfigElectra.required(spec.atSlot(nextSlot).getConfig())
-            .getMaxConsolidationRequestsPerPayload();
-    final List<ConsolidationRequest> tooManyConsolidationRequests =
-        IntStream.range(0, maxConsolidationRequests + 1)
-            .mapToObj(__ -> dataStructureUtil.randomConsolidationRequest())
-            .toList();
-    final ExecutionRequests tooManyParentExecutionRequests =
-        dataStructureUtil
-            .randomExecutionRequestsBuilder(nextSlot)
-            .consolidations(tooManyConsolidationRequests)
-            .build();
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState,
-            builder -> builder.parentExecutionRequests(tooManyParentExecutionRequests));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Parent execution requests has %d consolidation requests, max allowed %d",
-                        maxConsolidationRequests + 1, maxConsolidationRequests)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyParentBuilderDepositRequests(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final DataStructureUtil dataStructureUtil = specContext.getDataStructureUtil();
-    final int maxBuilderDepositRequests =
-        SpecConfigGloas.required(spec.atSlot(nextSlot).getConfig())
-            .getMaxBuilderDepositRequestsPerPayload();
-    final List<BuilderDepositRequest> tooManyBuilderDepositRequests =
-        IntStream.range(0, maxBuilderDepositRequests + 1)
-            .mapToObj(__ -> dataStructureUtil.randomBuilderDepositRequest())
-            .toList();
-    final ExecutionRequests tooManyParentExecutionRequests =
-        dataStructureUtil
-            .randomExecutionRequestsBuilder(nextSlot)
-            .builderDeposits(() -> tooManyBuilderDepositRequests)
-            .build();
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState,
-            builder -> builder.parentExecutionRequests(tooManyParentExecutionRequests));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Parent execution requests has %d builder deposit requests, max allowed %d",
-                        maxBuilderDepositRequests + 1, maxBuilderDepositRequests)));
-  }
-
-  @TestTemplate
-  void shouldRejectBlockWithTooManyParentBuilderExitRequests(final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState signedBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
-    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final DataStructureUtil dataStructureUtil = specContext.getDataStructureUtil();
-    final int maxBuilderExitRequests =
-        SpecConfigGloas.required(spec.atSlot(nextSlot).getConfig())
-            .getMaxBuilderExitRequestsPerPayload();
-    final List<BuilderExitRequest> tooManyBuilderExitRequests =
-        IntStream.range(0, maxBuilderExitRequests + 1)
-            .mapToObj(__ -> dataStructureUtil.randomBuilderExitRequest())
-            .toList();
-    final ExecutionRequests tooManyParentExecutionRequests =
-        dataStructureUtil
-            .randomExecutionRequestsBuilder(nextSlot)
-            .builderExits(() -> tooManyBuilderExitRequests)
-            .build();
-
-    final SignedBeaconBlock invalidBlock =
-        createBlockWithModifiedBody(
-            signedBlockAndState,
-            builder -> builder.parentExecutionRequests(tooManyParentExecutionRequests));
-
-    assertThat(blockGossipValidator.validate(invalidBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "Parent execution requests has %d builder exit requests, max allowed %d",
-                        maxBuilderExitRequests + 1, maxBuilderExitRequests)));
-  }
-
-  private SignedBeaconBlock createBlockWithModifiedBody(
-      final SignedBlockAndState baseBlockAndState,
-      final UnaryOperator<BeaconBlockBodyBuilder> operationsOverride) {
-    final SignedBeaconBlock originalSignedBeaconBlock = baseBlockAndState.getBlock();
-    final BeaconBlockBody originalBeaconBlockBody =
-        originalSignedBeaconBlock.getMessage().getBody();
-
-    final BeaconBlockBodyBuilder builder =
-        new BeaconBlockBodyBuilderGloas(
-            originalBeaconBlockBody.getSchema().toVersionGloas().orElseThrow());
-    builder
-        .randaoReveal(originalBeaconBlockBody.getRandaoReveal())
-        .eth1Data(originalBeaconBlockBody.getEth1Data())
-        .graffiti(originalBeaconBlockBody.getGraffiti())
-        .proposerSlashings(originalBeaconBlockBody.getProposerSlashings())
-        .attesterSlashings(originalBeaconBlockBody.getAttesterSlashings())
-        .attestations(originalBeaconBlockBody.getAttestations())
-        .deposits(originalBeaconBlockBody.getDeposits())
-        .voluntaryExits(originalBeaconBlockBody.getVoluntaryExits())
-        .syncAggregate(originalBeaconBlockBody.getOptionalSyncAggregate().orElseThrow())
-        .blsToExecutionChanges(
-            originalBeaconBlockBody.getOptionalBlsToExecutionChanges().orElseThrow())
-        .payloadAttestations(originalBeaconBlockBody.getOptionalPayloadAttestations().orElseThrow())
-        .parentExecutionRequests(
-            originalBeaconBlockBody.getOptionalParentExecutionRequests().orElseThrow())
-        .signedExecutionPayloadBid(
-            originalBeaconBlockBody.getOptionalSignedExecutionPayloadBid().orElseThrow());
-
-    final BeaconBlockBody modifiedBody = operationsOverride.apply(builder).build();
-
-    final UInt64 proposerIndex = originalSignedBeaconBlock.getMessage().getProposerIndex();
-
-    final BeaconBlock modifiedUnsignedBlock =
-        new BeaconBlock(
-            spec.getGenesisSchemaDefinitions().getBeaconBlockSchema(),
-            originalSignedBeaconBlock.getSlot(),
-            proposerIndex,
-            originalSignedBeaconBlock.getParentRoot(),
-            originalSignedBeaconBlock.getStateRoot(),
-            modifiedBody);
-
-    final BLSSignature newSignature =
-        storageSystem
-            .chainBuilder()
-            .getSigner(proposerIndex.intValue())
-            .signBlock(
-                modifiedUnsignedBlock,
-                storageSystem.chainBuilder().getLatestBlockAndState().getState().getForkInfo())
-            .join();
-
-    return SignedBeaconBlock.create(spec, modifiedUnsignedBlock, newSignature);
-  }
-
   private SignedBeaconBlock createBlockWithModifiedExecutionPayloadBid(
       final SignedBlockAndState baseBlockAndState,
       final Function<ExecutionPayloadBid, ExecutionPayloadBid> bidModifier) {
@@ -1232,6 +981,17 @@ public class BlockGossipValidatorTest {
             .join();
 
     return SignedBeaconBlock.create(spec, modifiedUnsignedBlock, newSignature);
+  }
+
+  private BeaconBlock createBlockWithUnknownParent(
+      final SignedBeaconBlock signedBlock, final Optional<UInt64> maybeProposerIndex) {
+    return new BeaconBlock(
+        spec.getGenesisSchemaDefinitions().getBeaconBlockSchema(),
+        signedBlock.getSlot(),
+        maybeProposerIndex.orElse(signedBlock.getMessage().getProposerIndex()),
+        Bytes32.ZERO,
+        signedBlock.getMessage().getStateRoot(),
+        signedBlock.getMessage().getBody());
   }
 
   private void assertResultIsAccept(

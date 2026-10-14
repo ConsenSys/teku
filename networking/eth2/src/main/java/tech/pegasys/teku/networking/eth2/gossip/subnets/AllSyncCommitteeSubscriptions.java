@@ -32,7 +32,8 @@ public class AllSyncCommitteeSubscriptions extends SyncCommitteeSubscriptionMana
 
   @Override
   public synchronized void onSlot(final UInt64 slot) {
-    // no-op, we don't need to ever unsubscribe
+    // never unsubscribe from subnets, only forget ended duties
+    pruneDuties(slot);
   }
 
   @Override

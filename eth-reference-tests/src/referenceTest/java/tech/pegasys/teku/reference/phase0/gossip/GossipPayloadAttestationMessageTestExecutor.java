@@ -26,11 +26,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
+import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
@@ -44,9 +46,19 @@ import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor {
+  private final List<String> testsToSkip;
+
+  public GossipPayloadAttestationMessageTestExecutor(final String... testsToSkip) {
+    this.testsToSkip = List.of(testsToSkip);
+  }
 
   @Override
   public void runTest(final TestDefinition testDefinition) throws Throwable {
+    if (testsToSkip.contains(testDefinition.getTestName())) {
+      throw new TestAbortedException(
+          "Test " + testDefinition.getDisplayName() + " has been ignored");
+    }
+
     final GossipPayloadAttestationMessageMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipPayloadAttestationMessageMetaData.class);
     final boolean signatureVerificationDisabled = metaData.getBlsSetting() == BlsSetting.IGNORED;
@@ -108,7 +120,7 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
     // even when that time is earlier than the store's time (which only moves forward). This is
     // necessary for disparity-boundary tests where blocks must be imported after their slot starts
     // but messages are validated at a time before the slot starts.
-    final UInt64[] validationTimeMs = {UInt64.valueOf(metaData.getCurrentTimeMs())};
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final GossipValidationHelper gossipValidationHelper =
         new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
           @Override
@@ -116,8 +128,13 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
             return validationTimeMs[0];
           }
         };
+    // The anchor state may predate Gloas when the vector spans the fork, and the message type only
+    // exists from Gloas
+    final SpecMilestone anchorMilestone = spec.atSlot(state.getSlot()).getMilestone();
+    final SpecMilestone schemaMilestone =
+        anchorMilestone.isLessThan(SpecMilestone.GLOAS) ? SpecMilestone.GLOAS : anchorMilestone;
     final PayloadAttestationMessageSchema schema =
-        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
+        SchemaDefinitionsGloas.required(spec.forMilestone(schemaMilestone).getSchemaDefinitions())
             .getPayloadAttestationMessageSchema();
     final PayloadAttestationMessageGossipValidator validator =
         new PayloadAttestationMessageGossipValidator(
@@ -149,9 +166,6 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", defaultValue = "0")
     private int blsSetting;
 
@@ -161,10 +175,6 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {

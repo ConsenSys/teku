@@ -64,6 +64,7 @@ public class LibP2PParamsFactoryTest {
     assertThat(gossipParams.getMaxIHaveLength()).isEqualTo(5000);
     assertThat(gossipParams.getMaxPeersAcceptedInPruneMsg()).isEqualTo(0);
     assertThat(gossipParams.getMaxIDontWantMessageIds()).isEqualTo(5000);
+    assertThat(gossipParams.getMaxTotalFields()).isEqualTo(32768);
   }
 
   @Test
@@ -73,6 +74,7 @@ public class LibP2PParamsFactoryTest {
             GossipConfig.builder().build(), spec.getNetworkingConfig());
 
     assertThat(gossipParams.getMaxSubscriptionsPerRpc())
-        .isEqualTo(LibP2PParamsFactory.MAX_SUBSCRIPTIONS_PER_MESSAGE);
+        .isEqualTo(LibP2PParamsFactory.MAX_OUTBOUND_SUBSCRIPTIONS_PER_RPC)
+        .isLessThanOrEqualTo(LibP2PParamsFactory.MAX_INBOUND_SUBSCRIPTIONS_PER_RPC);
   }
 }

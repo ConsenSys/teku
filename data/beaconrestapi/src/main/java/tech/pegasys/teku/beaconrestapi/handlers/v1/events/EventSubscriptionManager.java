@@ -152,20 +152,23 @@ public class EventSubscriptionManager
       final Bytes32 currentDutyDependentRoot,
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
-    optionalReorgContext.ifPresent(
-        context -> {
-          final ChainReorgEvent reorgEvent =
-              new ChainReorgEvent(
-                  slot,
-                  slot.minus(context.getCommonAncestorSlot()),
-                  context.getOldBestBlockRoot(),
-                  bestBlockRoot,
-                  context.getOldBestStateRoot(),
-                  stateRoot,
-                  configProvider.computeEpochAtSlot(slot),
-                  executionOptimistic);
-          notifySubscribersOfEvent(EventType.chain_reorg, reorgEvent);
-        });
+    // chain_reorg is a block reorg event; a payload reorg is reported through head_v2 only
+    optionalReorgContext
+        .filter(ReorgContext::isBlockReorg)
+        .ifPresent(
+            context -> {
+              final ChainReorgEvent reorgEvent =
+                  new ChainReorgEvent(
+                      slot,
+                      slot.minus(context.commonAncestorSlot()),
+                      context.oldBestBlockRoot(),
+                      bestBlockRoot,
+                      context.oldBestStateRoot(),
+                      stateRoot,
+                      configProvider.computeEpochAtSlot(slot),
+                      executionOptimistic);
+              notifySubscribersOfEvent(EventType.chain_reorg, reorgEvent);
+            });
 
     final HeadEvent headEvent =
         new HeadEvent(
@@ -229,12 +232,17 @@ public class EventSubscriptionManager
   }
 
   @Override
+  public void onExecutionPayloadAvailable(final SignedExecutionPayloadEnvelope executionPayload) {
+    final ExecutionPayloadAvailableEvent executionPayloadAvailableEvent =
+        new ExecutionPayloadAvailableEvent(
+            executionPayload.getSlot(), executionPayload.getBeaconBlockRoot());
+    notifySubscribersOfEvent(EventType.execution_payload_available, executionPayloadAvailableEvent);
+  }
+
+  @Override
   public void onExecutionPayloadImported(
       final SignedExecutionPayloadEnvelope executionPayload, final boolean executionOptimistic) {
     onNewExecutionPayload(executionPayload, executionOptimistic);
-    // TODO-GLOAS: potentially we can emit this event earlier when blob availability and
-    // verification is complete (before importing)
-    onExecutionPayloadAvailable(executionPayload);
   }
 
   @Override
@@ -358,14 +366,6 @@ public class EventSubscriptionManager
     final ExecutionPayloadEvent executionPayloadEvent =
         new ExecutionPayloadEvent(executionPayload, executionOptimistic);
     notifySubscribersOfEvent(EventType.execution_payload, executionPayloadEvent);
-  }
-
-  protected void onExecutionPayloadAvailable(
-      final SignedExecutionPayloadEnvelope executionPayload) {
-    final ExecutionPayloadAvailableEvent executionPayloadAvailableEvent =
-        new ExecutionPayloadAvailableEvent(
-            executionPayload.getSlot(), executionPayload.getBeaconBlockRoot());
-    notifySubscribersOfEvent(EventType.execution_payload_available, executionPayloadAvailableEvent);
   }
 
   protected void onExecutionPayloadBid(final SignedExecutionPayloadBid executionPayloadBid) {

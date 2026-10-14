@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.subnets;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -70,5 +71,31 @@ public class SyncCommitteeSubscriptionManagerTest {
     verify(network).unsubscribeFromSyncCommitteeSubnetId(2);
     verify(network).unsubscribeFromSyncCommitteeSubnetId(3);
     verify(network, never()).unsubscribeFromSyncCommitteeSubnetId(4);
+  }
+
+  @Test
+  void getValidatorsWithDuty_shouldReturnRecordedValidators() {
+    manager.recordDuty(1, UInt64.valueOf(16));
+    manager.recordDuty(2, UInt64.valueOf(32));
+
+    assertThat(manager.getValidatorsWithDuty()).containsExactlyInAnyOrder(1, 2);
+  }
+
+  @Test
+  void getValidatorsWithDuty_shouldForgetEndedDuties() {
+    manager.recordDuty(1, UInt64.valueOf(16));
+    manager.recordDuty(2, UInt64.valueOf(32));
+    manager.onSlot(UInt64.valueOf(16));
+
+    assertThat(manager.getValidatorsWithDuty()).containsExactly(2);
+  }
+
+  @Test
+  void getValidatorsWithDuty_shouldKeepLatestEndSlot() {
+    manager.recordDuty(1, UInt64.valueOf(32));
+    manager.recordDuty(1, UInt64.valueOf(16));
+    manager.onSlot(UInt64.valueOf(16));
+
+    assertThat(manager.getValidatorsWithDuty()).containsExactly(1);
   }
 }

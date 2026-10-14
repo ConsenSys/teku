@@ -129,6 +129,7 @@ public class LibP2PNetworkBuilder {
         advertisedAddresses,
         gossipNetwork,
         listenPorts,
+        config.isTcpEnabled(),
         config.isQuicEnabled());
   }
 
@@ -336,7 +337,7 @@ public class LibP2PNetworkBuilder {
 
           // Yamux must take precedence during negotiation
           if (config.isYamuxEnabled()) {
-            // https://github.com/Consensys/teku/issues/7532
+            // https://github.com/Consensys-Incorporated/teku/issues/7532
             final int maxBufferedConnectionWrites = 150 * 1024 * 1024;
             b.getMuxers().add(StreamMuxerProtocol.getYamux(maxBufferedConnectionWrites));
           }

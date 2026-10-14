@@ -24,6 +24,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -127,6 +128,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
   public static final ImmutableMap<String, TestExecutor> FORK_CHOICE_TEST_TYPES =
       ImmutableMap.<String, TestExecutor>builder()
           .put("fork_choice/get_head", new ForkChoiceTestExecutor())
+          .put("fork_choice/filter_node_tree_variants", new ForkChoiceTestExecutor())
           .put("fork_choice/ex_ante", new ForkChoiceTestExecutor())
           .put("fork_choice/reorg", new ForkChoiceTestExecutor())
           .put("fork_choice/on_block", new ForkChoiceTestExecutor())
@@ -145,7 +147,8 @@ public class ForkChoiceTestExecutor implements TestExecutor {
               "fork_choice/should_apply_proposer_boost",
               new ForkChoiceTestExecutor(
                   // TODO this is skipped because it relies on equivocation, which is not
-                  // currently implemented. See https://github.com/Consensys/teku/issues/10608
+                  // currently implemented. See
+                  // https://github.com/Consensys-Incorporated/teku/issues/10608
                   "should_apply_proposer_boost_withheld"))
           // Fork choice generated test types
           .put("fork_choice_compliance/block_weight_test", new ForkChoiceTestExecutor())
@@ -217,7 +220,8 @@ public class ForkChoiceTestExecutor implements TestExecutor {
     final MergeTransitionBlockValidator transitionBlockValidator =
         new MergeTransitionBlockValidator(spec, recentChainData);
     final InlineEventThread eventThread = new InlineEventThread();
-    final KZG kzg = KzgRetriever.getKzgWithLoadedTrustedSetup(spec, testDefinition.getConfigName());
+    final KZG kzg =
+        KzgRetriever.getKzgWithLoadedTrustedSetup(spec, testDefinition.getNetwork().configName());
     final StubBlobSidecarManager blobSidecarManager = new StubBlobSidecarManager(kzg);
     final CurrentSlotProvider currentSlotProvider =
         CurrentSlotProvider.create(spec, recentChainData.getStore());
@@ -596,7 +600,8 @@ public class ForkChoiceTestExecutor implements TestExecutor {
                               + payloadAttestationMessage.getData().getSlot()
                               + " and block root "
                               + payloadAttestationMessage.getData().getBeaconBlockRoot()));
-      validatablePayloadAttestationMessage.calculatePtcPositions(spec, state);
+      validatablePayloadAttestationMessage.calculatePayloadTimelinessCommitteePositions(
+          spec, state);
     }
     assertDoesNotThrow(
         () ->
@@ -1117,7 +1122,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
       throws IOException {
     final ForkChoiceMetaData metaData;
     final Path metaPath = testDefinition.getTestDirectory().resolve("meta.yaml");
-    if (metaPath.toFile().exists()) {
+    if (Files.exists(metaPath)) {
       metaData = loadYaml(testDefinition, "meta.yaml", ForkChoiceMetaData.class);
     } else {
       metaData = ForkChoiceMetaData.DEFAULT;

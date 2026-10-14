@@ -29,24 +29,18 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
-import tech.pegasys.teku.spec.config.SpecConfig;
-import tech.pegasys.teku.spec.config.SpecConfigCapella;
-import tech.pegasys.teku.spec.config.SpecConfigElectra;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
-import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
@@ -123,27 +117,7 @@ public class BlockGossipValidator {
      */
     if (gossipValidationHelper.isSlotFromFuture(block.getSlot())) {
       LOG.trace("BlockValidator: Block is from the future. Saving for future processing.");
-      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
-    }
-
-    /*
-     * [New in Gloas:EIP7688]
-     * [REJECT] The block body operation counts are within their limits.
-     */
-    final Optional<InternalValidationResult> operationLimitsValidationResult =
-        verifyBlockBodyOperationLimits(block);
-    if (operationLimitsValidationResult.isPresent()) {
-      return completedFuture(operationLimitsValidationResult.get());
-    }
-
-    /*
-     * [New in Gloas:EIP7688]
-     * [REJECT] The parent execution request counts are within their limits.
-     */
-    final Optional<InternalValidationResult> executionRequestsLimitsValidationResult =
-        verifyExecutionRequestsLimits(block);
-    if (executionRequestsLimitsValidationResult.isPresent()) {
-      return completedFuture(executionRequestsLimitsValidationResult.get());
+      return checkSignatureBeforeSavingForFuture(block);
     }
 
     if (gossipValidationHelper.isBlockAvailable(block.getRoot())) {
@@ -162,7 +136,7 @@ public class BlockGossipValidator {
      */
     if (!gossipValidationHelper.isBlockAvailable(block.getParentRoot())) {
       LOG.trace("Block parent is not available. Saving for future processing.");
-      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+      return checkSignatureBeforeSavingForFuture(block);
     }
 
     /*
@@ -183,7 +157,7 @@ public class BlockGossipValidator {
     if (maybeParentBlockSlot.isEmpty()) {
       LOG.trace(
           "BlockValidator: Parent block does not exist. It will be saved for future processing");
-      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+      return checkSignatureBeforeSavingForFuture(block);
     }
 
     /*
@@ -265,6 +239,15 @@ public class BlockGossipValidator {
       }
     }
 
+    /*
+     * [REJECT] The proposer signature, signed_beacon_block.signature, is valid with respect to the proposer_index pubkey.
+     * Checked before the execution payload bid's parent, which may save the block for future
+     * processing, so that only correctly signed blocks are queued.
+     */
+    if (!blockSignatureIsValidWithRespectToProposerIndex(block, parentState)) {
+      return reject("Block signature is invalid");
+    }
+
     if (maybeSignedExecutionPayloadBid.isPresent()) {
       final ExecutionPayloadBid executionPayloadBid =
           maybeSignedExecutionPayloadBid.get().getMessage();
@@ -291,12 +274,6 @@ public class BlockGossipValidator {
       }
     }
 
-    /*
-     * [REJECT] The proposer signature, signed_beacon_block.signature, is valid with respect to the proposer_index pubkey.
-     */
-    if (!blockSignatureIsValidWithRespectToProposerIndex(block, parentState)) {
-      return reject("Block signature is invalid");
-    }
     final EquivocationCheckResult secondEquivocationCheckResult =
         performBlockEquivocationCheck(markAsReceived, block);
 
@@ -317,153 +294,6 @@ public class BlockGossipValidator {
               IGNORE_ALREADY_SEEN,
               "Block is not the first with valid signature for its slot. It will be dropped.");
     };
-  }
-
-  /**
-   * Verifies that each Gloas block body operation count is within its limit and that the block
-   * contains no deposits. This rule is Gloas-only: EIP-7688 turned these operation lists into
-   * unbounded progressive lists, so SSZ no longer enforces the limits and this must be checked
-   * during gossip validation instead. Pre-Gloas blocks are unaffected, since their operation lists
-   * are still bounded at the SSZ level.
-   */
-  private Optional<InternalValidationResult> verifyBlockBodyOperationLimits(
-      final SignedBeaconBlock block) {
-    if (!spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
-      return Optional.empty();
-    }
-
-    final BeaconBlockBody body = block.getMessage().getBody();
-    final SszList<PayloadAttestation> payloadAttestations =
-        body.getOptionalPayloadAttestations().orElseThrow();
-
-    final SpecConfig specConfig = spec.atSlot(block.getSlot()).getConfig();
-
-    final int maxProposerSlashings = specConfig.getMaxProposerSlashings();
-    final int proposerSlashingsCount = body.getProposerSlashings().size();
-    if (proposerSlashingsCount > maxProposerSlashings) {
-      return Optional.of(
-          reject(
-              "Block has %d proposer slashings, max allowed %d",
-              proposerSlashingsCount, maxProposerSlashings));
-    }
-
-    final int maxAttesterSlashings =
-        SpecConfigElectra.required(specConfig).getMaxAttesterSlashingsElectra();
-    final int attesterSlashingsCount = body.getAttesterSlashings().size();
-    if (attesterSlashingsCount > maxAttesterSlashings) {
-      return Optional.of(
-          reject(
-              "Block has %d attester slashings, max allowed %d",
-              attesterSlashingsCount, maxAttesterSlashings));
-    }
-
-    final int maxAttestations = SpecConfigElectra.required(specConfig).getMaxAttestationsElectra();
-    final int attestationsCount = body.getAttestations().size();
-    if (attestationsCount > maxAttestations) {
-      return Optional.of(
-          reject("Block has %d attestations, max allowed %d", attestationsCount, maxAttestations));
-    }
-
-    final int depositsCount = body.getDeposits().size();
-    if (depositsCount != 0) {
-      return Optional.of(reject("Block must not contain deposits, found %d", depositsCount));
-    }
-
-    final int maxVoluntaryExits = specConfig.getMaxVoluntaryExits();
-    final int voluntaryExitsCount = body.getVoluntaryExits().size();
-    if (voluntaryExitsCount > maxVoluntaryExits) {
-      return Optional.of(
-          reject(
-              "Block has %d voluntary exits, max allowed %d",
-              voluntaryExitsCount, maxVoluntaryExits));
-    }
-
-    final int maxBlsToExecutionChanges =
-        SpecConfigCapella.required(specConfig).getMaxBlsToExecutionChanges();
-    final int blsToExecutionChangesCount =
-        body.getOptionalBlsToExecutionChanges().orElseThrow().size();
-    if (blsToExecutionChangesCount > maxBlsToExecutionChanges) {
-      return Optional.of(
-          reject(
-              "Block has %d bls to execution changes, max allowed %d",
-              blsToExecutionChangesCount, maxBlsToExecutionChanges));
-    }
-
-    final int maxPayloadAttestations =
-        SpecConfigGloas.required(specConfig).getMaxPayloadAttestations();
-    final int payloadAttestationsCount = payloadAttestations.size();
-    if (payloadAttestationsCount > maxPayloadAttestations) {
-      return Optional.of(
-          reject(
-              "Block has %d payload attestations, max allowed %d",
-              payloadAttestationsCount, maxPayloadAttestations));
-    }
-
-    return Optional.empty();
-  }
-
-  /**
-   * Verifies that each Gloas parent execution request count is within its limit. This rule is
-   * Gloas-only: EIP-7688 turned these request lists into unbounded progressive lists, so SSZ no
-   * longer enforces the limits and this must be checked during gossip validation instead. Pre-Gloas
-   * blocks are unaffected, since they don't carry parent execution requests at all.
-   */
-  private Optional<InternalValidationResult> verifyExecutionRequestsLimits(
-      final SignedBeaconBlock block) {
-    if (!spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
-      return Optional.empty();
-    }
-
-    final BeaconBlockBody body = block.getMessage().getBody();
-    final ExecutionRequests parentExecutionRequests =
-        body.getOptionalParentExecutionRequests().orElseThrow();
-    final ExecutionRequestsGloas parentExecutionRequestsGloas =
-        ExecutionRequestsGloas.required(parentExecutionRequests);
-
-    final SpecConfig specConfig = spec.atSlot(block.getSlot()).getConfig();
-
-    final int maxWithdrawalRequests =
-        SpecConfigElectra.required(specConfig).getMaxWithdrawalRequestsPerPayload();
-    final int withdrawalRequestsCount = parentExecutionRequests.getWithdrawals().size();
-    if (withdrawalRequestsCount > maxWithdrawalRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d withdrawal requests, max allowed %d",
-              withdrawalRequestsCount, maxWithdrawalRequests));
-    }
-
-    final int maxConsolidationRequests =
-        SpecConfigElectra.required(specConfig).getMaxConsolidationRequestsPerPayload();
-    final int consolidationRequestsCount = parentExecutionRequests.getConsolidations().size();
-    if (consolidationRequestsCount > maxConsolidationRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d consolidation requests, max allowed %d",
-              consolidationRequestsCount, maxConsolidationRequests));
-    }
-
-    final int maxBuilderDepositRequests =
-        SpecConfigGloas.required(specConfig).getMaxBuilderDepositRequestsPerPayload();
-    final int builderDepositRequestsCount =
-        parentExecutionRequestsGloas.getBuilderDeposits().size();
-    if (builderDepositRequestsCount > maxBuilderDepositRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d builder deposit requests, max allowed %d",
-              builderDepositRequestsCount, maxBuilderDepositRequests));
-    }
-
-    final int maxBuilderExitRequests =
-        SpecConfigGloas.required(specConfig).getMaxBuilderExitRequestsPerPayload();
-    final int builderExitRequestsCount = parentExecutionRequestsGloas.getBuilderExits().size();
-    if (builderExitRequestsCount > maxBuilderExitRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d builder exit requests, max allowed %d",
-              builderExitRequestsCount, maxBuilderExitRequests));
-    }
-
-    return Optional.empty();
   }
 
   /**
@@ -524,6 +354,64 @@ public class BlockGossipValidator {
     FIRST_BLOCK_FOR_SLOT_PROPOSER,
     BLOCK_ALREADY_SEEN_FOR_SLOT_PROPOSER,
     EQUIVOCATING_BLOCK_FOR_SLOT_PROPOSER
+  }
+
+  /**
+   * Verifies the proposer signature of a block that is about to be saved for future processing
+   * before being fully validated, because its slot is in the future or its parent is not yet known.
+   * Without this check any peer could fill the future and pending block queues with blocks nobody
+   * signed, at no cost to its peer score.
+   *
+   * <p>The parent state isn't available, so the signing domain is taken from the fork schedule and
+   * the proposer's pubkey from the latest finalized state, or from the head state for a validator
+   * that isn't finalized yet. Whether the block was proposed by the expected proposer depends on
+   * its branch's shuffling and is checked, along with the rest of the block, once it is processed.
+   *
+   * <p>Matching Prysm, an invalid signature is rejected, and a proposer index that the head state
+   * doesn't have is ignored rather than rejected.
+   */
+  private SafeFuture<InternalValidationResult> checkSignatureBeforeSavingForFuture(
+      final SignedBeaconBlock block) {
+    final Optional<ForkInfo> maybeForkInfo =
+        gossipValidationHelper.getForkInfo(spec.computeEpochAtSlot(block.getSlot()));
+    if (maybeForkInfo.isEmpty()) {
+      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+    }
+    final Optional<BLSPublicKey> maybeFinalizedProposerPublicKey =
+        spec.getValidatorPubKey(
+            gossipValidationHelper.getLatestFinalizedState(), block.getProposerIndex());
+    if (maybeFinalizedProposerPublicKey.isPresent()) {
+      return completedFuture(
+          checkProposerSignature(
+              block, maybeFinalizedProposerPublicKey.get(), maybeForkInfo.get()));
+    }
+    // the validator may have been added since the latest finalized state, so use the head state
+    return gossipValidationHelper
+        .getHeadState()
+        .thenApply(
+            maybeHeadState ->
+                maybeHeadState
+                    .flatMap(
+                        headState -> spec.getValidatorPubKey(headState, block.getProposerIndex()))
+                    .map(
+                        proposerPublicKey ->
+                            checkProposerSignature(block, proposerPublicKey, maybeForkInfo.get()))
+                    .orElseGet(
+                        () ->
+                            ignore(
+                                "Block proposer index %s is not a known validator",
+                                block.getProposerIndex())));
+  }
+
+  private InternalValidationResult checkProposerSignature(
+      final SignedBeaconBlock block,
+      final BLSPublicKey proposerPublicKey,
+      final ForkInfo forkInfo) {
+    final Bytes signingRoot = signingRootUtil.signingRootForSignBlock(block.getMessage(), forkInfo);
+    if (!BLS.verify(proposerPublicKey, signingRoot, block.getSignature())) {
+      return reject("Block signature is invalid");
+    }
+    return InternalValidationResult.SAVE_FOR_FUTURE;
   }
 
   private boolean blockSignatureIsValidWithRespectToProposerIndex(

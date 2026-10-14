@@ -32,6 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,6 +52,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -64,6 +66,9 @@ import tech.pegasys.teku.statetransition.validation.ExecutionPayloadBidGossipVal
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public class DefaultExecutionPayloadBidManagerTest {
+  @SuppressWarnings("unchecked")
+  private final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier =
+      mock(Supplier.class);
 
   private final Spec spec = TestSpecFactory.createMainnetGloas();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
@@ -81,7 +86,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   private final ReceivedExecutionPayloadBidEventsChannel
       receivedExecutionPayloadBidEventsChannelPublisher =
           mock(ReceivedExecutionPayloadBidEventsChannel.class);
-  private final PendingPool<SignedExecutionPayloadBid> pendingExecutionPayloadBids =
+  private final PendingPool<PendingExecutionPayloadBid> pendingExecutionPayloadBids =
       new PoolFactory(new StubMetricsSystem()).createPendingPoolForExecutionPayloadBids(spec);
 
   @SuppressWarnings("unchecked")
@@ -96,14 +101,61 @@ public class DefaultExecutionPayloadBidManagerTest {
           receivedExecutionPayloadBidEventsChannelPublisher,
           pendingExecutionPayloadBids,
           builderBidFetcher,
-          bidSelector);
+          bidSelector,
+          forkChoiceStrategySupplier,
+          true);
 
   @BeforeEach
   public void setup() {
+    when(forkChoiceStrategySupplier.get()).thenReturn(Optional.empty());
     when(executionPayloadBidCircuitBreaker.isEngaged(any(), any())).thenReturn(false);
-    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any()))
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(Collections.emptyList()));
     executionPayloadBidManager.subscribeOperationAdded(operationAddedSubscriber);
+  }
+
+  @Test
+  void resolvesDependentRootOnlyAfterDeferredValidationCompletes() {
+    final SignedExecutionPayloadBid signedExecutionPayloadBid =
+        createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.ONE);
+    executionPayloadBidManager.onSlot(signedExecutionPayloadBid.getMessage().getSlot());
+    final SafeFuture<InternalValidationResult> validation = new SafeFuture<>();
+    when(executionPayloadBidGossipValidator.validate(signedExecutionPayloadBid))
+        .thenReturn(validation);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final Bytes32 root = dataStructureUtil.randomBytes32();
+    when(forkChoiceStrategySupplier.get()).thenReturn(Optional.of(forkChoiceStrategy));
+    when(forkChoiceStrategy.getAncestor(
+            signedExecutionPayloadBid.getMessage().getParentBlockRoot(), UInt64.ZERO))
+        .thenReturn(Optional.of(root));
+
+    final SafeFuture<InternalValidationResult> result =
+        executionPayloadBidManager.validateAndAddBid(
+            signedExecutionPayloadBid, RemoteBidOrigin.P2P);
+    verifyNoInteractions(forkChoiceStrategySupplier, forkChoiceStrategy);
+    assertThat(pendingExecutionPayloadBids.size()).isZero();
+    validation.complete(SAVE_FOR_FUTURE);
+
+    assertThat(result).isCompletedWithValue(SAVE_FOR_FUTURE);
+    assertThat(pendingExecutionPayloadBids.get(signedExecutionPayloadBid.hashTreeRoot()))
+        .contains(new PendingExecutionPayloadBid(signedExecutionPayloadBid, Optional.of(root)));
+    verify(forkChoiceStrategy)
+        .getAncestor(signedExecutionPayloadBid.getMessage().getParentBlockRoot(), UInt64.ZERO);
+  }
+
+  @Test
+  void doesNotResolveDependentRootForProcessableOrDiscardedBids() {
+    for (final InternalValidationResult result :
+        List.of(
+            ACCEPT, InternalValidationResult.IGNORE, InternalValidationResult.reject("invalid"))) {
+      final SignedExecutionPayloadBid signedBid =
+          createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.ONE);
+      when(executionPayloadBidGossipValidator.validate(signedBid))
+          .thenReturn(SafeFuture.completedFuture(result));
+      assertThat(executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P))
+          .isCompletedWithValue(result);
+    }
+    verifyNoInteractions(forkChoiceStrategySupplier);
   }
 
   @Test
@@ -226,7 +278,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final BidForBlock builderBidForBlock =
         new BidForBlock(builderBidRaw, UInt256.ONE, Optional.empty());
 
-    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any()))
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(builderBids));
     when(bidSelector.selectBestRemoteBid(any(), eq(builderBids), any(), any(), any(), any()))
         .thenReturn(Optional.of(builderBid));
@@ -245,6 +297,66 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     assertThat(selectedBid).isEqualTo(builderBidForBlock);
     verify(bidSelector).selectBestRemoteBid(any(), eq(builderBids), any(), any(), any(), any());
+  }
+
+  @Test
+  public void p2pBidsAreNotConsideredWhenDisabled() {
+    final DefaultExecutionPayloadBidManager executionPayloadBidManager =
+        new DefaultExecutionPayloadBidManager(
+            spec,
+            executionPayloadBidGossipValidator,
+            executionPayloadBidCircuitBreaker,
+            receivedExecutionPayloadBidEventsChannelPublisher,
+            pendingExecutionPayloadBids,
+            builderBidFetcher,
+            bidSelector,
+            forkChoiceStrategySupplier,
+            false);
+    executionPayloadBidManager.subscribeOperationAdded(operationAddedSubscriber);
+
+    final UInt64 slot = UInt64.valueOf(10);
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+    final BeaconStateGloas state = stateAtSlot(slot);
+
+    final SignedExecutionPayloadBid p2pBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(300));
+    when(executionPayloadBidGossipValidator.validate(p2pBid))
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
+    SafeFutureAssert.safeJoin(
+        executionPayloadBidManager.validateAndAddBid(p2pBid, RemoteBidOrigin.P2P));
+
+    // the bid is still accepted and published, but not kept for block proposal
+    verify(operationAddedSubscriber).onOperationAdded(p2pBid, ACCEPT, true);
+    assertThat(executionPayloadBidManager.getP2PBidsForSlot(slot)).isEmpty();
+
+    final SignedExecutionPayloadBid builderBidRaw =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(200));
+    final RemoteBid builderBid = toRemoteBid(builderBidRaw);
+    final List<RemoteBid> builderBids = List.of(builderBid);
+    final BidForBlock builderBidForBlock =
+        new BidForBlock(builderBidRaw, UInt256.ONE, Optional.empty());
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(builderBids));
+    when(bidSelector.selectBestRemoteBid(any(), eq(builderBids), any(), any(), any(), any()))
+        .thenReturn(Optional.of(builderBid));
+    when(bidSelector.selectBestBidForBlock(any(), eq(Optional.of(builderBid)), any(), eq(slot)))
+        .thenReturn(builderBidForBlock);
+
+    final BidForBlock selectedBid =
+        SafeFutureAssert.safeJoin(
+            executionPayloadBidManager.getBidForBlock(
+                parentRoot,
+                parentBlockHash,
+                state,
+                SafeFuture.completedFuture(randomGetPayloadResponse(slot, parentBlockHash)),
+                BuilderConfig.NO_OP,
+                blockProductionPerformance));
+
+    assertThat(selectedBid).isEqualTo(builderBidForBlock);
+    // only the builder bids are passed to the selector
+    verify(bidSelector)
+        .selectBestRemoteBid(eq(Set.of()), eq(builderBids), any(), any(), any(), any());
   }
 
   @Test
@@ -410,7 +522,11 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     SafeFutureAssert.safeJoin(
         executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.BUILDER));
-    assertThat(pendingExecutionPayloadBids.get(signedBid.hashTreeRoot())).contains(signedBid);
+    assertThat(
+            pendingExecutionPayloadBids
+                .get(signedBid.hashTreeRoot())
+                .map(PendingExecutionPayloadBid::signedBid))
+        .contains(signedBid);
     verify(receivedExecutionPayloadBidEventsChannelPublisher, never())
         .onExecutionPayloadBidValidated(signedBid);
 

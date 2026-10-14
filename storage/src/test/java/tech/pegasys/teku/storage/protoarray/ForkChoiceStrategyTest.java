@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -51,6 +52,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeDataWithParent;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
@@ -199,10 +201,14 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
 
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, ptcPositions(threshold), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, ptcPositions(threshold), true, false);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(threshold), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(threshold), true, false);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isFalse();
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createEmpty(blockRoot))).isFalse();
   }
@@ -232,10 +238,14 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
 
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, ptcPositions(threshold), false, true);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, ptcPositions(threshold), false, true);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(threshold), false, true);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(threshold), false, true);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isFalse();
   }
 
@@ -247,7 +257,9 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
         SpecConfigGloas.required(fixture.spec().atSlot(fixture.block().getSlot()).getConfig())
             .getDataAvailabilityTimelyThreshold();
 
-    fixture.strategy().onPtcVote(blockRoot, ptcPositions(threshold + 1), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, ptcPositions(threshold + 1), true, false);
 
     assertThat(shouldBuildOnFull(fixture, UInt64.valueOf(3), ForkChoiceNode.createFull(blockRoot)))
         .isTrue();
@@ -288,7 +300,9 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
         SpecConfigGloas.required(fixture.spec().atSlot(fixture.block().getSlot()).getConfig())
             .getDataAvailabilityTimelyThreshold();
 
-    fixture.strategy().onPtcVote(otherRoot, ptcPositions(threshold + 1), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(otherRoot, ptcPositions(threshold + 1), true, false);
 
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
   }
@@ -298,10 +312,10 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     final GloasPayloadDecisionFixture fixture = createGloasPayloadDecisionFixture();
     final Bytes32 blockRoot = fixture.block().getRoot();
 
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(0, 1), true, true);
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(2), true, false);
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(3), false, true);
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(1), false, false);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(0, 1), true, true);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(2), true, false);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(3), false, true);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(1), false, false);
 
     assertThat(fixture.strategy().getPayloadAttesterCount(blockRoot)).isEqualTo(UInt64.valueOf(4));
     assertThat(fixture.strategy().getPayloadAvailabilityYesCount(blockRoot))
@@ -631,6 +645,90 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     assertThat(boundaryFullNodeIndex).isPresent();
     assertThat(boundaryBaseNode(fixture).getParentIndex()).isEmpty();
     assertThat(childBaseNode(fixture).getParentIndex()).isEqualTo(boundaryFullNodeIndex);
+  }
+
+  @Test
+  void getBlockDataWithParent_shouldPairGloasNodesWithTheirParentNodes() {
+    final GloasBoundaryFixture fixture = createGloasBoundaryFixture();
+    fixture
+        .strategy()
+        .applyUpdate(
+            List.of(
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.boundary()),
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.child())),
+            Map.of(fixture.boundary().getRoot(), fixture.boundaryExecutionPayload()),
+            emptySet(),
+            emptyMap(),
+            fixture.finalizedCheckpoint(),
+            Optional.of(fixture.boundaryBlockAndCheckpoints()));
+    final Bytes32 boundaryRoot = fixture.boundary().getRoot();
+    final Bytes32 childRoot = fixture.child().getRoot();
+
+    final Map<ForkChoiceNode, Optional<ForkChoiceNode>> parentByNode =
+        fixture.strategy().getBlockDataWithParent().stream()
+            .collect(
+                Collectors.toMap(
+                    nodeWithParent -> toForkChoiceNode(nodeWithParent.node()),
+                    nodeWithParent -> nodeWithParent.parent().map(this::toForkChoiceNode)));
+
+    // the finalized boundary block is the anchor, so its PENDING node has no retained parent
+    assertThat(parentByNode.get(ForkChoiceNode.createBase(boundaryRoot))).isEmpty();
+    // a block's EMPTY and FULL nodes have the same block's PENDING node as parent
+    assertThat(parentByNode.get(ForkChoiceNode.createEmpty(boundaryRoot)))
+        .contains(ForkChoiceNode.createBase(boundaryRoot));
+    assertThat(parentByNode.get(ForkChoiceNode.createFull(boundaryRoot)))
+        .contains(ForkChoiceNode.createBase(boundaryRoot));
+    assertThat(parentByNode.get(ForkChoiceNode.createEmpty(childRoot)))
+        .contains(ForkChoiceNode.createBase(childRoot));
+    // a block's PENDING node has the parent block's node it builds on, here the FULL one
+    assertThat(parentByNode.get(ForkChoiceNode.createBase(childRoot)))
+        .contains(ForkChoiceNode.createFull(boundaryRoot));
+  }
+
+  @Test
+  void getBlockDataWithParent_shouldUseBidParentBlockHashForGloasPendingAndEmptyNodes() {
+    final GloasBoundaryFixture fixture = createGloasBoundaryFixture();
+    fixture
+        .strategy()
+        .applyUpdate(
+            List.of(
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.boundary()),
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.child())),
+            Map.of(fixture.boundary().getRoot(), fixture.boundaryExecutionPayload()),
+            emptySet(),
+            emptyMap(),
+            fixture.finalizedCheckpoint(),
+            Optional.of(fixture.boundaryBlockAndCheckpoints()));
+    final Bytes32 childRoot = fixture.child().getRoot();
+    final Bytes32 bidParentBlockHash =
+        fixture
+            .child()
+            .getBlock()
+            .getMessage()
+            .getBody()
+            .getOptionalSignedExecutionPayloadBid()
+            .orElseThrow()
+            .getMessage()
+            .getParentBlockHash();
+
+    final Map<ForkChoiceNode, Bytes32> executionBlockHashByNode =
+        fixture.strategy().getBlockDataWithParent().stream()
+            .map(ProtoNodeDataWithParent::node)
+            .collect(
+                Collectors.toMap(this::toForkChoiceNode, ProtoNodeData::getExecutionBlockHash));
+
+    assertThat(executionBlockHashByNode.get(ForkChoiceNode.createBase(childRoot)))
+        .isEqualTo(bidParentBlockHash);
+    assertThat(executionBlockHashByNode.get(ForkChoiceNode.createEmpty(childRoot)))
+        .isEqualTo(bidParentBlockHash);
+  }
+
+  private ForkChoiceNode toForkChoiceNode(final ProtoNodeData node) {
+    return switch (node.getPayloadStatus()) {
+      case PAYLOAD_STATUS_PENDING -> ForkChoiceNode.createBase(node.getRoot());
+      case PAYLOAD_STATUS_EMPTY -> ForkChoiceNode.createEmpty(node.getRoot());
+      case PAYLOAD_STATUS_FULL -> ForkChoiceNode.createFull(node.getRoot());
+    };
   }
 
   @Test
@@ -1134,6 +1232,158 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     assertThat(protoArray.isFullyValidated(currentJustified.getRoot())).isTrue();
     // the head is optimistic because it is not viable
     assertThat(forkChoiceState.isHeadOptimistic()).isTrue();
+  }
+
+  @Test
+  void findHead_gloasShouldReturnEmptyVariantOfJustifiedBlockWhenNoNodeIsViable() {
+    // Gloas get_head never returns a PENDING node: get_node_children always expands the PENDING
+    // justified node into its EMPTY variant (plus FULL when the payload is verified), regardless
+    // of the filtered tree. When no node under the justified root is viable the spec therefore
+    // still returns a variant of the justified block. Before consensus-specs PR 5509 that was
+    // EMPTY or FULL by weight and tiebreaker; since PR 5509 an explicit guard pins it to
+    // ForkChoiceNode(root=store.justified_checkpoint.root, payload_status=PAYLOAD_STATUS_EMPTY).
+    // Teku instead falls back to the structural PENDING base node.
+    //
+    // The fixture reaches the "no viable node" state artificially, by handing findHead a justified
+    // checkpoint that no imported block carries. In a real run the store's justified checkpoint
+    // only advances through a descendant block whose voting source matches it, and that block stays
+    // viable for as long as it is in protoarray. The only way to lose every viable node under the
+    // justified root is therefore EL invalidation of the justifying branch (markNodeInvalid), for
+    // example a buggy execution client rejecting a canonical payload. The invalidation flow itself
+    // is covered by the next test.
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final StorageSystem storageSystem = initStorageSystem(gloasSpec);
+    final SignedBlockAndState justifiedBlock = storageSystem.chainUpdater().advanceChain(1);
+    storageSystem.chainUpdater().advanceChain(2);
+    final ForkChoiceStrategy strategy = getProtoArray(storageSystem);
+
+    // Every imported block carries the genesis checkpoints. Pretending the store has justified
+    // justifiedBlock at epoch 3 while the current epoch is 6 makes every node fail the FFG test:
+    // its voting source neither matches the justified epoch nor lies within the last two epochs.
+    final Checkpoint justifiedCheckpoint =
+        new Checkpoint(UInt64.valueOf(3), justifiedBlock.getRoot());
+    final Checkpoint finalizedCheckpoint =
+        storageSystem.recentChainData().getFinalizedCheckpoint().orElseThrow();
+
+    final SlotAndForkChoiceNode head =
+        strategy.findHead(UInt64.valueOf(6), justifiedCheckpoint, finalizedCheckpoint);
+
+    assertThat(strategy.getChainHeads(false)).describedAs("viable heads").isEmpty();
+    assertThat(head.slot()).isEqualTo(justifiedBlock.getSlot());
+    assertThat(head.node()).isEqualTo(ForkChoiceNode.createEmpty(justifiedBlock.getRoot()));
+  }
+
+  @Test
+  void onForkChoiceUpdatedResult_gloasInvalidWithoutLatestValidHashShouldInvalidatePayloadOwner() {
+    // An INVALID forkchoiceUpdated verdict is about a payload, and in Gloas only FULL nodes own
+    // one: BASE and EMPTY nodes inherit the execution hash of the nearest FULL ancestor. When the
+    // EL gives no latestValidHash, the verdict must land on that FULL ancestor and everything
+    // built on it, not only on the EMPTY head node that was sent to the EL. Otherwise the block's
+    // BASE node survives as a viable, childless, non-optimistic PENDING head.
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final ChainBuilder chainBuilder = ChainBuilder.create(gloasSpec);
+    final SignedBlockAndState genesis = chainBuilder.generateGenesis();
+    final SignedBlockAndState blockB = chainBuilder.generateBlockAtSlot(ONE);
+    final SignedBlockAndState blockC = chainBuilder.generateBlockAtSlot(2);
+    final Bytes32 genesisPayloadHash =
+        genesis.getExecutionBlockHash().orElse(ProtoNode.NO_EXECUTION_BLOCK_HASH);
+    final Bytes32 payloadHashB = dataStructureUtil.randomBytes32();
+    final ForkChoiceNode emptyB = ForkChoiceNode.createEmpty(blockB.getRoot());
+    final ForkChoiceNode fullB = ForkChoiceNode.createFull(blockB.getRoot());
+    final ForkChoiceNode baseC = ForkChoiceNode.createBase(blockC.getRoot());
+    final ForkChoiceNode emptyC = ForkChoiceNode.createEmpty(blockC.getRoot());
+
+    final Checkpoint genesisCheckpoint = new Checkpoint(ZERO, genesis.getRoot());
+    final ProtoArray protoArray =
+        ProtoArray.builder()
+            .spec(gloasSpec)
+            .currentEpoch(ZERO)
+            .justifiedCheckpoint(genesisCheckpoint)
+            .finalizedCheckpoint(genesisCheckpoint)
+            .build();
+    addBlockToProtoArray(gloasSpec, protoArray, genesis);
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        genesis,
+        ForkChoiceNode.createEmpty(genesis.getRoot()),
+        ForkChoiceNode.createBase(genesis.getRoot()),
+        ZERO,
+        genesisPayloadHash,
+        false);
+    // B builds on EMPTY(genesis): BASE(B) and EMPTY(B) inherit the genesis payload hash
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        blockB,
+        ForkChoiceNode.createBase(blockB.getRoot()),
+        ForkChoiceNode.createEmpty(genesis.getRoot()),
+        ZERO,
+        genesisPayloadHash,
+        false);
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        blockB,
+        emptyB,
+        ForkChoiceNode.createBase(blockB.getRoot()),
+        ZERO,
+        genesisPayloadHash,
+        false);
+    // B's payload is imported optimistically: FULL(B) is the only node owning payloadHashB
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        blockB,
+        fullB,
+        ForkChoiceNode.createBase(blockB.getRoot()),
+        ONE,
+        payloadHashB,
+        true);
+    // C builds on FULL(B) and its payload has not been revealed: BASE(C) and EMPTY(C) inherit
+    // payloadHashB and are optimistic because their parent is
+    addProjectedNodeToProtoArray(
+        gloasSpec, protoArray, blockC, baseC, fullB, ONE, payloadHashB, true);
+    addProjectedNodeToProtoArray(
+        gloasSpec, protoArray, blockC, emptyC, baseC, ONE, payloadHashB, true);
+    final ForkChoiceStrategy strategy = ForkChoiceStrategy.initialize(gloasSpec, protoArray);
+
+    final SlotAndForkChoiceNode headSentToEl =
+        strategy.findHead(ZERO, genesisCheckpoint, genesisCheckpoint);
+    assertThat(headSentToEl.node()).isEqualTo(emptyC);
+    assertThat(
+            strategy
+                .getBlockData(blockB.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL)
+                .orElseThrow()
+                .isOptimistic())
+        .isTrue();
+
+    // The EL rejects the head hash (payloadHashB) without reporting a latest valid hash
+    strategy.onForkChoiceUpdatedResult(
+        headSentToEl, PayloadStatus.invalid(Optional.empty(), Optional.of("bad payload")), true);
+
+    final SlotAndForkChoiceNode head =
+        strategy.findHead(ZERO, genesisCheckpoint, genesisCheckpoint);
+    assertThat(head.node()).describedAs("head after invalidation").isEqualTo(emptyB);
+    // FULL(B) owns the rejected payload, so it and every variant of C must be gone
+    assertThat(strategy.getBlockData(blockB.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .describedAs("FULL(B)")
+        .isEmpty();
+    assertThat(
+            strategy.getBlockData(blockC.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING))
+        .describedAs("BASE(C)")
+        .isEmpty();
+    assertThat(
+            strategy.getBlockData(blockC.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY))
+        .describedAs("EMPTY(C)")
+        .isEmpty();
+    // B's block and EMPTY variant are untouched
+    assertThat(
+            strategy
+                .getBlockData(blockB.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY)
+                .orElseThrow()
+                .getValidationStatus())
+        .isEqualTo(ProtoNodeValidationStatus.VALID);
   }
 
   @Test

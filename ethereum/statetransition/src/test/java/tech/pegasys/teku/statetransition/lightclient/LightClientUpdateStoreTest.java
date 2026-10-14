@@ -14,21 +14,33 @@
 package tech.pegasys.teku.statetransition.lightclient;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.function.BiPredicate;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class LightClientUpdateStoreTest {
@@ -36,15 +48,126 @@ public class LightClientUpdateStoreTest {
   /** Blocks are on the canonical chain unless a test says otherwise. */
   private static final BiPredicate<UInt64, Bytes32> CANONICAL = (slot, root) -> true;
 
+  private SpecContext specContext;
   private Spec spec;
   private DataStructureUtil dataStructureUtil;
+  private final LightClientUpdateChannel channel = mock(LightClientUpdateChannel.class);
   private LightClientUpdateStore store;
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
+    this.specContext = specContext;
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
-    store = new LightClientUpdateStore(spec);
+    when(channel.onNewBestLightClientUpdate(any(), any(), any())).thenReturn(SafeFuture.COMPLETE);
+    when(channel.onRemoveBestLightClientUpdates(any())).thenReturn(SafeFuture.COMPLETE);
+    when(channel.onPruneBestLightClientUpdatesBefore(any())).thenReturn(SafeFuture.COMPLETE);
+    store = new LightClientUpdateStore(spec, channel);
+  }
+
+  @TestTemplate
+  public void addUpdate_shouldPersistOnlyWhenTheBestUpdateChanges() {
+    final LightClientUpdate better =
+        createLightClientUpdate().syncCommitteeParticipants(supermajorityParticipants()).build();
+    final LightClientUpdate worse =
+        createLightClientUpdate()
+            .syncCommitteeParticipants(supermajorityParticipants() - 1)
+            .build();
+    final Bytes32 betterRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 worseRoot = dataStructureUtil.randomBytes32();
+
+    store.addUpdate(better, betterRoot, CANONICAL);
+    store.addUpdate(worse, worseRoot, CANONICAL);
+
+    verify(channel).onNewBestLightClientUpdate(UInt64.ONE, better, betterRoot);
+    verify(channel, never()).onNewBestLightClientUpdate(UInt64.ONE, worse, worseRoot);
+  }
+
+  @TestTemplate
+  public void addUpdate_shouldNotPersistAnOrphanedUpdate() {
+    store.addUpdate(
+        createLightClientUpdateAtPeriod(1),
+        dataStructureUtil.randomBytes32(),
+        (slot, root) -> false);
+
+    verifyNoInteractions(channel);
+  }
+
+  @TestTemplate
+  public void pruneUpdatesBefore_shouldPruneStorage() {
+    store.pruneUpdatesBefore(UInt64.ONE);
+
+    verify(channel).onPruneBestLightClientUpdatesBefore(UInt64.ONE);
+  }
+
+  @TestTemplate
+  public void removeNonCanonicalUpdates_shouldRemoveOnlyOrphanedPeriodsFromStorage() {
+    final Bytes32 canonicalRoot = dataStructureUtil.randomBytes32();
+    store.addUpdate(createLightClientUpdateAtPeriod(1), canonicalRoot, CANONICAL);
+    store.addUpdate(
+        createLightClientUpdateAtPeriod(2), dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.removeNonCanonicalUpdates(UInt64.ZERO, (slot, root) -> root.equals(canonicalRoot));
+
+    verify(channel).onRemoveBestLightClientUpdates(List.of(UInt64.valueOf(2)));
+  }
+
+  @TestTemplate
+  public void removeNonCanonicalUpdates_shouldNotTouchStorageWhenNothingIsOrphaned() {
+    store.addUpdate(
+        createLightClientUpdateAtPeriod(1), dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.removeNonCanonicalUpdates(UInt64.ZERO, CANONICAL);
+
+    verify(channel, never()).onRemoveBestLightClientUpdates(any());
+  }
+
+  @TestTemplate
+  public void loadUpdates_shouldRestoreUpdatesWithoutPersistingThemAgain() {
+    final LightClientUpdate update = createLightClientUpdateAtPeriod(1);
+    final Bytes32 root = dataStructureUtil.randomBytes32();
+
+    store.loadUpdates(List.of(new StoredLightClientUpdate(UInt64.ONE, update, root)));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(update);
+    verifyNoInteractions(channel);
+
+    store.removeNonCanonicalUpdates(UInt64.ZERO, (slot, blockRoot) -> blockRoot.equals(root));
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(update);
+  }
+
+  @TestTemplate
+  public void loadUpdates_shouldKeepABetterUpdateTrackedBeforeLoading() {
+    final LightClientUpdate better =
+        createLightClientUpdate().syncCommitteeParticipants(supermajorityParticipants()).build();
+    final LightClientUpdate worse =
+        createLightClientUpdate()
+            .syncCommitteeParticipants(supermajorityParticipants() - 1)
+            .build();
+    store.addUpdate(better, dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.loadUpdates(
+        List.of(new StoredLightClientUpdate(UInt64.ONE, worse, dataStructureUtil.randomBytes32())));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(better);
+    verify(channel, never()).onNewBestLightClientUpdate(any(), eq(worse), any());
+  }
+
+  @TestTemplate
+  public void loadUpdates_shouldReplaceAndPersistAWorseUpdateTrackedBeforeLoading() {
+    final LightClientUpdate better =
+        createLightClientUpdate().syncCommitteeParticipants(supermajorityParticipants()).build();
+    final LightClientUpdate worse =
+        createLightClientUpdate()
+            .syncCommitteeParticipants(supermajorityParticipants() - 1)
+            .build();
+    final Bytes32 betterRoot = dataStructureUtil.randomBytes32();
+    store.addUpdate(worse, dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.loadUpdates(List.of(new StoredLightClientUpdate(UInt64.ONE, better, betterRoot)));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(better);
+    verify(channel).onNewBestLightClientUpdate(UInt64.ONE, better, betterRoot);
   }
 
   @TestTemplate
@@ -126,6 +249,26 @@ public class LightClientUpdateStoreTest {
         .isEqualTo(finalizedInAttestedPeriod);
     assertThat(getBestUpdateAfterAdding(finalizedInEarlierPeriod, finalizedInAttestedPeriod))
         .isEqualTo(finalizedInAttestedPeriod);
+  }
+
+  @TestTemplate
+  public void addUpdate_shouldCompareUpdatesWithPreAltairFinalizedHeader() {
+    specContext.assumeIsOneOf(SpecMilestone.ALTAIR);
+    spec = TestSpecFactory.createMinimalWithAltairForkEpoch(UInt64.ONE);
+    dataStructureUtil = new DataStructureUtil(spec);
+    final LightClientUpdate moreParticipants =
+        createLightClientUpdate()
+            .finalizedSlot(UInt64.ZERO)
+            .syncCommitteeParticipants(supermajorityParticipants() + 1)
+            .build();
+    final LightClientUpdate fewerParticipants =
+        createLightClientUpdate()
+            .finalizedSlot(UInt64.ZERO)
+            .syncCommitteeParticipants(supermajorityParticipants())
+            .build();
+
+    assertThat(getBestUpdateAfterAdding(fewerParticipants, moreParticipants))
+        .isEqualTo(moreParticipants);
   }
 
   @TestTemplate
@@ -256,11 +399,14 @@ public class LightClientUpdateStoreTest {
         dataStructureUtil.randomLightClientFinalityUpdate(
             periodOneStartSlot().increment(), periodOneStartSlot());
 
-    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
+    assertThat(store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
     assertThat(store.getLatestFinalityUpdate()).contains(newer);
 
-    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isFalse();
     assertThat(store.getLatestFinalityUpdate()).contains(newer);
   }
 
@@ -298,11 +444,14 @@ public class LightClientUpdateStoreTest {
     final LightClientOptimisticUpdate newer =
         dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot().increment());
 
-    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
+    assertThat(store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
     assertThat(store.getLatestOptimisticUpdate()).contains(newer);
 
-    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isFalse();
     assertThat(store.getLatestOptimisticUpdate()).contains(newer);
   }
 
@@ -463,12 +612,14 @@ public class LightClientUpdateStoreTest {
 
   private UInt64 periodOneStartSlot() {
     return spec.computeStartSlotAtEpoch(
-        spec.getSyncCommitteeUtilRequired(UInt64.ZERO)
-            .computeFirstEpochOfNextSyncCommitteePeriod(UInt64.ZERO));
+        UInt64.valueOf(altairConfig().getEpochsPerSyncCommitteePeriod()));
   }
 
   private int supermajorityParticipants() {
-    return (SpecConfigAltair.required(spec.getGenesisSpecConfig()).getSyncCommitteeSize() * 2 + 2)
-        / 3;
+    return (altairConfig().getSyncCommitteeSize() * 2 + 2) / 3;
+  }
+
+  private SpecConfigAltair altairConfig() {
+    return SpecConfigAltair.required(spec.forMilestone(SpecMilestone.ALTAIR).getConfig());
   }
 }
