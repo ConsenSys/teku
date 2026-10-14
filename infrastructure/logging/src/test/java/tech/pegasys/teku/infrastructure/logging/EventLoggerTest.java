@@ -155,6 +155,21 @@ class EventLoggerTest {
                 + newExecutionHead.toUnprefixedHexString());
   }
 
+  @Test
+  void slotEvent_shouldLogSlotEventWithHeadBlock() {
+    // log-based monitoring matches on this text, so keep it stable
+    EVENT_LOG.slotEvent(
+        NEW_HEAD_SLOT, NEW_HEAD_SLOT, NEW_HEAD_ROOT, UInt64.valueOf(2), UInt64.ONE, 5);
+
+    assertThat(logCaptor.getInfoLogs())
+        .containsExactly(
+            "Slot Event  *** Slot: "
+                + NEW_HEAD_SLOT
+                + ", Block: "
+                + LogFormatter.formatHashRoot(NEW_HEAD_ROOT)
+                + ", Justified: 2, Finalized: 1, Peers: 5");
+  }
+
   private static String block(final Bytes32 root, final UInt64 slot) {
     return root.toUnprefixedHexString() + " (" + slot + ")";
   }

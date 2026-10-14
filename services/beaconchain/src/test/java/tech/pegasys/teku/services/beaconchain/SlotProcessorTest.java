@@ -315,7 +315,7 @@ public class SlotProcessorTest {
     final Checkpoint finalizedCheckpoint = recentChainData.getStore().getFinalizedCheckpoint();
     final MinimalBeaconBlockSummary headBlock = recentChainData.getHeadBlock().orElseThrow();
     verify(eventLogger)
-        .slotBlockEvent(
+        .slotEvent(
             ZERO,
             recentChainData.getHeadSlot(),
             headBlock.getRoot(),
