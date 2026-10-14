@@ -25,6 +25,7 @@ import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadContext;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
@@ -699,6 +700,10 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
   private boolean canReusePinnedBlockProduction(
       final PinnedBlockProductionPreparation preparation) {
+    if (!isHezeActiveAt(preparation.slot())) {
+      // Before Heze a repeated request always re-pins, so it picks up an updated fork choice state.
+      return false;
+    }
     // Keep a pin that is still preparing (possibly with inclusion list payload attributes) or that
     // already has a payloadId. Replace a pin that failed or has no payloadId, so a retried block
     // production request sends a fresh forkChoiceUpdated instead of returning the same failure.
@@ -707,6 +712,10 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
     return !executionPayloadContext.isDone()
         || (executionPayloadContext.isCompletedNormally()
             && executionPayloadContext.getImmediately().isPresent());
+  }
+
+  private boolean isHezeActiveAt(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.HEZE);
   }
 
   private SafeFuture<Optional<ExecutionPayloadContext>>
