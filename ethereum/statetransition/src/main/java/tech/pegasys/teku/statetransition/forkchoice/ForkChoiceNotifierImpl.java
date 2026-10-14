@@ -389,8 +389,15 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
       // Reuse the payloadId requested by the ordinary fcU. If that fcU failed (e.g. EL error or
       // timeout) or the EL answered it without a payloadId (e.g. SYNCING), the reused result is
       // unusable, so request a fresh one instead of failing block production with it.
-      productionForkChoiceUpdateData
-          .getExecutionPayloadContext()
+      final SafeFuture<Optional<ExecutionPayloadContext>> reusedExecutionPayloadContext =
+          productionForkChoiceUpdateData.getExecutionPayloadContext();
+      // A result already known to be unusable is resent by the retry, so sending the reused data
+      // as well would only issue a duplicate fcU whose result is dropped.
+      final boolean reusedResultIsUnusable =
+          reusedExecutionPayloadContext.isCompletedExceptionally()
+              || (reusedExecutionPayloadContext.isCompletedNormally()
+                  && reusedExecutionPayloadContext.getImmediately().isEmpty());
+      reusedExecutionPayloadContext
           .handleComposed(
               (maybeExecutionPayloadContext, error) ->
                   eventThread.executeFuture(
@@ -398,7 +405,9 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
                           retryPinnedBlockProductionIfPayloadIdIsUnavailable(
                               preparation, maybeExecutionPayloadContext, error)))
           .propagateTo(preparation.executionPayloadContext());
-      sendForkChoiceUpdated(productionForkChoiceUpdateData);
+      if (!reusedResultIsUnusable) {
+        sendForkChoiceUpdated(productionForkChoiceUpdateData);
+      }
     } else {
       updatePayloadAttributesForPinnedBlockProduction(preparation);
     }

@@ -1289,6 +1289,45 @@ class ForkChoiceNotifierTest {
         .isCompletedWithOptionalContaining(executionPayloadContext);
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void getPayloadId_shouldNotResendUnusableReusedResultAfterResendWindow(
+      final boolean reusedResultFailed) {
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final Bytes32 blockRoot = recentChainData.getBestBlockRoot().orElseThrow();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(
+            reusedResultFailed
+                ? SafeFuture.failedFuture(new RuntimeException("EL error"))
+                : SafeFuture.completedFuture(
+                    createForkChoiceUpdatedResult(
+                        ExecutionPayloadStatus.SYNCING, Optional.empty())))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(payloadId))));
+
+    notifyForkChoiceUpdated(forkChoiceState);
+    timeProvider.advanceTimeByMillis(RESEND_AFTER_MILLIS.longValue() + 1);
+
+    // only the retry is sent; resending the unusable reused data would be a dropped duplicate
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(blockSlot));
+
+    verify(executionLayerChannel, times(2))
+        .engineForkChoiceUpdated(forkChoiceState, Optional.of(payloadBuildingAttributes));
+    final ExecutionPayloadContext executionPayloadContext =
+        new ExecutionPayloadContext(payloadId, forkChoiceState, payloadBuildingAttributes);
+    assertThatSafeFuture(notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot))
+        .isCompletedWithOptionalContaining(executionPayloadContext);
+  }
+
   @Test
   void getPayloadId_shouldResendForkChoiceUpdatedOnlyOnceWhenReusedResultFails() {
     final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
