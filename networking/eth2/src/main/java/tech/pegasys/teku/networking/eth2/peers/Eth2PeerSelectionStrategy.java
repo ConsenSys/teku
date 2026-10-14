@@ -69,13 +69,33 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
       final Supplier<? extends Collection<DiscoveryPeer>> candidates) {
     final PeerSubnetSubscriptions peerSubnetSubscriptions =
         peerSubnetSubscriptionsFactory.create(network);
+    // A pending dial reserves one slot for its identity until it completes or times out. Pending
+    // dials are read before the connected snapshot, and both budgets derive from that snapshot, so
+    // a dial completing in between is counted once, as connected. Whether to fill is decided on
+    // connected peers alone, so pending dials never stop a node that is below its lower bound
+    // from bursting towards the upper bound; they only take their slots out of that burst.
+    final Set<NodeId> pendingPeerIds =
+        network.streamPendingConnections().collect(Collectors.toSet());
+    final List<? extends Peer> connectedPeers = network.streamPeers().toList();
+    final Set<NodeId> pendingUnconnectedPeerIds = new HashSet<>(pendingPeerIds);
+    connectedPeers.forEach(peer -> pendingUnconnectedPeerIds.remove(peer.getId()));
     final int peersRequiredForPeerCount =
-        targetPeerCountRange.getPeersToAdd(network.getPeerCount());
-    final int randomlySelectedPeerCount = getCurrentRandomlySelectedPeerCount(network, peerPools);
+        Math.max(
+            0,
+            targetPeerCountRange.getPeersToAdd(connectedPeers.size())
+                - pendingUnconnectedPeerIds.size());
+    final int randomlySelectedPeerCount =
+        countRandomlySelectedPeers(connectedPeers, peerPools)
+            + countPendingPeersInPool(pendingUnconnectedPeerIds, peerPools, RANDOMLY_SELECTED);
     final int randomlySelectedPeersToAdd =
         targetPeerCountRange.getRandomlySelectedPeersToAdd(randomlySelectedPeerCount);
 
-    final int peersRequiredForSubnets = peerSubnetSubscriptions.getSubscribersRequired();
+    // Pending repair dials are not usable coverage, so the deficit is measured against connected
+    // peers only; outstanding score-based dials cap this search's repair dials instead.
+    final int pendingScoreBasedDials =
+        countPendingPeersInPool(pendingUnconnectedPeerIds, peerPools, SCORE_BASED);
+    final int peersRequiredForSubnets =
+        Math.max(0, peerSubnetSubscriptions.getSubscribersRequired() - pendingScoreBasedDials);
     final int scoreBasedPeersToAdd =
         Math.max(peersRequiredForPeerCount - randomlySelectedPeersToAdd, peersRequiredForSubnets);
     final int maxPeersToAdd = scoreBasedPeersToAdd + randomlySelectedPeersToAdd;
@@ -88,9 +108,9 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
     final List<PeerAddress> selectedPeers = new ArrayList<>();
     // Candidates are records, not peers: the search results and the known-peer stream can both
     // carry a record for the same identity. Each peer ID gets at most one slot across both stages;
-    // the set records every selection and both stages filter on Set.add, which relies on the
-    // streams staying sequential.
-    final Set<NodeId> selectedPeerIds = new HashSet<>();
+    // the set starts with the pending dials, records every selection, and both stages filter on
+    // Set.add, which relies on the streams staying sequential.
+    final Set<NodeId> selectedPeerIds = new HashSet<>(pendingPeerIds);
 
     if (randomlySelectedPeersToAdd > 0) {
       selectedPeers.addAll(
@@ -146,11 +166,20 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
         .toList();
   }
 
-  private int getCurrentRandomlySelectedPeerCount(
-      final P2PNetwork<?> network, final PeerPools peerPools) {
+  private static int countPendingPeersInPool(
+      final Set<NodeId> pendingPeerIds,
+      final PeerPools peerPools,
+      final PeerConnectionType peerPool) {
     return (int)
-        network
-            .streamPeers()
+        pendingPeerIds.stream()
+            .filter(peerId -> peerPools.getPeerConnectionType(peerId) == peerPool)
+            .count();
+  }
+
+  private static int countRandomlySelectedPeers(
+      final List<? extends Peer> connectedPeers, final PeerPools peerPools) {
+    return (int)
+        connectedPeers.stream()
             .filter(peer -> peerPools.getPeerConnectionType(peer.getId()) == RANDOMLY_SELECTED)
             .filter(Peer::connectionInitiatedLocally)
             .count();

@@ -330,6 +330,44 @@ public class PeerManagerTest {
   }
 
   @Test
+  public void shouldReportPendingConnectionUntilDialFails() {
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> dial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(dial);
+    assertThat(peerManager.streamPendingConnections()).isEmpty();
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    assertThat(peerManager.streamPendingConnections()).containsExactly(peerAddress.getId());
+
+    dial.completeExceptionally(new RuntimeException("Nope"));
+    assertThat(result).isCompletedExceptionally();
+    assertThat(peerManager.streamPendingConnections()).isEmpty();
+  }
+
+  @Test
+  public void shouldReportPendingConnectionUntilDialSucceeds() {
+    final Connection connection = mock(Connection.class);
+    final Session secureSession =
+        new Session(
+            PeerId.random(), PeerId.random(), EcdsaKt.generateEcdsaKeyPair().component2(), null);
+    when(connection.secureSession()).thenReturn(secureSession);
+    when(connection.closeFuture()).thenReturn(new SafeFuture<>());
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> dial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(dial);
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    assertThat(peerManager.streamPendingConnections()).containsExactly(peerAddress.getId());
+
+    peerManager.handleConnection(connection);
+    dial.complete(connection);
+    assertThat(result).isCompleted();
+    assertThat(peerManager.streamPendingConnections()).isEmpty();
+  }
+
+  @Test
   public void connect_shouldNotDropNewPendingConnectionWhenPreviousAttemptCompletes() {
     final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
     final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);

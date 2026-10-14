@@ -69,6 +69,11 @@ public class MockP2PNetwork<P extends Peer> implements P2PNetwork<P> {
   }
 
   @Override
+  public Stream<NodeId> streamPendingConnections() {
+    return Stream.empty();
+  }
+
+  @Override
   public Bytes getPrivateKey() {
     return Bytes.EMPTY;
   }

@@ -133,6 +133,11 @@ public class PeerManager implements ConnectionHandler {
     connectSubscribers.unsubscribe(subscriptionId);
   }
 
+  /** Peers with a locally initiated dial in progress, i.e. not yet connected or failed. */
+  public Stream<NodeId> streamPendingConnections() {
+    return pendingConnections.keySet().stream();
+  }
+
   public SafeFuture<Peer> connect(final MultiaddrPeerAddress peer, final Network network) {
     final SafeFuture<Peer> pendingConnection =
         pendingConnections.computeIfAbsent(peer.getId(), __ -> doConnect(peer, network));

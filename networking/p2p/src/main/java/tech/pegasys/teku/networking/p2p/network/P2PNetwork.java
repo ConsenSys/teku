@@ -74,6 +74,9 @@ public interface P2PNetwork<T extends Peer> extends GossipNetwork {
 
   boolean isConnected(PeerAddress peerAddress);
 
+  /** Peers with a locally initiated dial in progress, i.e. neither connected nor failed yet. */
+  Stream<NodeId> streamPendingConnections();
+
   Bytes getPrivateKey();
 
   Optional<T> getPeer(NodeId id);

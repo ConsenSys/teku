@@ -17,6 +17,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -53,6 +54,11 @@ public abstract class DelegatingP2PNetwork<T extends Peer> implements P2PNetwork
   @Override
   public boolean isConnected(final PeerAddress peerAddress) {
     return network.isConnected(peerAddress);
+  }
+
+  @Override
+  public Stream<NodeId> streamPendingConnections() {
+    return network.streamPendingConnections();
   }
 
   @Override

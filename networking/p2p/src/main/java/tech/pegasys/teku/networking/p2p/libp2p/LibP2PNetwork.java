@@ -140,6 +140,11 @@ public class LibP2PNetwork implements P2PNetwork<Peer> {
   }
 
   @Override
+  public Stream<NodeId> streamPendingConnections() {
+    return peerManager.streamPendingConnections();
+  }
+
+  @Override
   public Bytes getPrivateKey() {
     return Bytes.wrap(privKey.raw());
   }

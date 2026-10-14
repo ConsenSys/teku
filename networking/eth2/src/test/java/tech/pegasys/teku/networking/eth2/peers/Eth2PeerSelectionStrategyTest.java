@@ -111,7 +111,7 @@ class Eth2PeerSelectionStrategyTest {
   @Test
   void selectPeersToConnect_shouldConnectToNewPeersWhenSubnetsNeedsMoreSubscribers() {
     final Eth2PeerSelectionStrategy strategy = createStrategy(1, 2, 0);
-    when(network.getPeerCount()).thenReturn(2); // At upper bound of peers
+    withConnectedPeers(2); // At upper bound of peers
     when(peerSubnetSubscriptions.getSubscribersRequired()).thenReturn(2);
     peerScorer.setScore(
         DISCOVERY_PEER1.getPersistentAttestationSubnets(),
@@ -242,6 +242,154 @@ class Eth2PeerSelectionStrategyTest {
   }
 
   @Test
+  void selectPeersToConnect_shouldSkipCandidateWithPendingDialWhenBudgetRemains() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(2, 2, 0);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    // The pending dial reserves one of the two slots; the other goes to a different candidate
+    assertThat(
+            strategy.selectPeersToConnect(
+                network,
+                peerPools,
+                () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2, DISCOVERY_PEER3)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldKeepFillingTowardsUpperBoundWhileDialsArePending() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(2, 4, 0);
+    // Below the lower bound with one dial in flight: the burst to the upper bound continues,
+    // minus the slot the pending dial already holds
+    withConnectedPeers(1);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network,
+                peerPools,
+                () ->
+                    List.of(
+                        DISCOVERY_PEER1,
+                        DISCOVERY_PEER2,
+                        DISCOVERY_PEER3,
+                        createDiscoveryPeer(PEER4, 4))))
+        .containsExactly(PEER2, PEER3);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldNotDialReplacementWhenPendingDialFillsBudget() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(1, 1, 0);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .isEmpty();
+  }
+
+  @Test
+  void selectPeersToConnect_shouldCountPendingRandomDialTowardsRandomMinimum() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(0, 4, 1);
+    peerPools.addPeerToPool(PEER1.getId(), PeerConnectionType.RANDOMLY_SELECTED);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .isEmpty();
+  }
+
+  @Test
+  void selectPeersToConnect_shouldNotStackRepairDialsWhileScoreBasedDialIsPending() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(1, 2, 0);
+    withConnectedPeers(2); // At upper bound of peers
+    when(peerSubnetSubscriptions.getSubscribersRequired()).thenReturn(1);
+    // PEER1 is a pending score-based dial (the default pool), i.e. an outstanding repair
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .isEmpty();
+  }
+
+  @Test
+  void selectPeersToConnect_shouldRepairSubnetDeficitBeyondPendingScoreBasedDials() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(1, 2, 0);
+    withConnectedPeers(2); // At upper bound of peers
+    when(peerSubnetSubscriptions.getSubscribersRequired()).thenReturn(2);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network,
+                peerPools,
+                () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2, DISCOVERY_PEER3)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldStillRepairSubnetWhilePendingDialIsRandom() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(1, 2, 0);
+    withConnectedPeers(2); // At upper bound of peers
+    when(peerSubnetSubscriptions.getSubscribersRequired()).thenReturn(1);
+    peerPools.addPeerToPool(PEER1.getId(), PeerConnectionType.RANDOMLY_SELECTED);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    // A pending random dial is not a repair, and its advertised subnets are not coverage yet
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldNotCountConnectingPeerInBothConnectedAndPending() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(2, 2, 0);
+    // PEER1 has just connected but its dial future has not completed yet
+    when(network.streamPeers()).thenAnswer(__ -> Stream.of(new StubPeer(new MockNodeId(1))));
+    when(network.isConnected(PEER1)).thenReturn(true);
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldCountPeerOnceWhenItConnectsAfterPendingSnapshot() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(2, 2, 0);
+    // PEER1 is pending when the pending dials are read, and already connected when the connected
+    // peers are read; it must be counted once either way
+    when(network.streamPendingConnections()).thenReturn(Stream.of(PEER1.getId()));
+    when(network.getPeerCount()).thenReturn(1);
+    when(network.streamPeers()).thenAnswer(__ -> Stream.of(new StubPeer(new MockNodeId(1))));
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldNotCountConnectingRandomPeerInBothConnectedAndPending() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(0, 4, 2);
+    final StubPeer connectingPeer = new StubPeer(new MockNodeId(1));
+    peerPools.addPeerToPool(connectingPeer.getId(), PeerConnectionType.RANDOMLY_SELECTED);
+    when(network.getPeerCount()).thenReturn(1);
+    when(network.isConnected(PEER1)).thenReturn(true);
+    when(network.streamPeers()).thenAnswer(__ -> Stream.of(connectingPeer));
+    when(network.streamPendingConnections()).thenReturn(Stream.of(connectingPeer.getId()));
+
+    // One random peer is connecting; one more random dial is still needed
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
   void selectPeersToConnect_shouldConnectToRandomPeers() {
     final Eth2PeerSelectionStrategy strategy = createStrategy(0, 4, 2);
     withShuffleOrder(DISCOVERY_PEER3, DISCOVERY_PEER1, DISCOVERY_PEER2);
@@ -283,8 +431,14 @@ class Eth2PeerSelectionStrategyTest {
         IntStream.range(0, 5).mapToObj(index -> new StubPeer(new MockNodeId(20 + index))).toList();
     existingRandomlySelectedPeers.forEach(
         peer -> peerPools.addPeerToPool(peer.getId(), PeerConnectionType.RANDOMLY_SELECTED));
+    final List<StubPeer> otherConnectedPeers =
+        IntStream.range(0, 4).mapToObj(index -> new StubPeer(new MockNodeId(30 + index))).toList();
     when(network.getPeerCount()).thenReturn(9);
-    when(network.streamPeers()).thenAnswer(__ -> existingRandomlySelectedPeers.stream());
+    when(network.streamPeers())
+        .thenAnswer(
+            __ ->
+                Stream.concat(
+                    existingRandomlySelectedPeers.stream(), otherConnectedPeers.stream()));
 
     final List<DiscoveryPeer> candidatePeers =
         IntStream.range(0, 12)
@@ -506,6 +660,16 @@ class Eth2PeerSelectionStrategyTest {
     when(peerSubnetSubscriptions.getSubscribersRequired()).thenReturn(1);
 
     assertThat(strategy.selectPeersToDisconnect(network, peerPools)).isEmpty();
+  }
+
+  /** Stubs {@code count} connected peers that belong to no pool, plus the matching peer count. */
+  private void withConnectedPeers(final int count) {
+    final List<StubPeer> connectedPeers =
+        IntStream.range(0, count)
+            .mapToObj(index -> new StubPeer(new MockNodeId(40 + index)))
+            .toList();
+    when(network.getPeerCount()).thenReturn(count);
+    when(network.streamPeers()).thenAnswer(__ -> connectedPeers.stream());
   }
 
   private Eth2PeerSelectionStrategy createStrategy() {
