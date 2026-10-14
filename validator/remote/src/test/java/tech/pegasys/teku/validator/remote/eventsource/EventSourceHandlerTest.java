@@ -343,7 +343,7 @@ class EventSourceHandlerTest {
   private EventSourceHandler createHandler(final boolean generateEarlyAttestations) {
     return new EventSourceHandler(
         validatorTimingChannel,
-        EventStreamMetrics.create(metricsSystem),
+        metricsSystem,
         generateEarlyAttestations,
         spec,
         validatorLogger,

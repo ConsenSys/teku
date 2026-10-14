@@ -68,7 +68,7 @@ public class EventSourceBeaconChainEventAdapter
   private final BeaconChainEventAdapter timeBasedEventAdapter;
   private final boolean generateEarlyAttestations;
   private final ValidatorTimingChannel validatorTimingChannel;
-  private final EventStreamMetrics eventStreamMetrics;
+  private final MetricsSystem metricsSystem;
   private final Spec spec;
 
   private final boolean shutdownWhenValidatorSlashedEnabled;
@@ -92,7 +92,7 @@ public class EventSourceBeaconChainEventAdapter
     this.validatorLogger = validatorLogger;
     this.timeBasedEventAdapter = timeBasedEventAdapter;
     this.validatorTimingChannel = validatorTimingChannel;
-    this.eventStreamMetrics = EventStreamMetrics.create(metricsSystem);
+    this.metricsSystem = metricsSystem;
     this.generateEarlyAttestations = generateEarlyAttestations;
     this.shutdownWhenValidatorSlashedEnabled = shutdownWhenValidatorSlashedEnabled;
     this.spec = spec;
@@ -182,7 +182,7 @@ public class EventSourceBeaconChainEventAdapter
   EventSourceHandler createEventSourceHandler(final RemoteValidatorApiChannel beaconNodeApi) {
     return new EventSourceHandler(
         validatorTimingChannel,
-        eventStreamMetrics,
+        metricsSystem,
         generateEarlyAttestations,
         spec,
         validatorLogger,
