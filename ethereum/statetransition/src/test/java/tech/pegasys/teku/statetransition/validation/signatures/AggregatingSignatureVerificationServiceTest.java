@@ -415,7 +415,7 @@ public class AggregatingSignatureVerificationServiceTest {
 
     final CompletableFuture<List<SignatureTask>> batch =
         CompletableFuture.supplyAsync(service::waitForBatch);
-    Thread.sleep(100);
+    waitUntilFirstTaskTaken();
     executeValidVerify(1, 1);
     executeValidVerify(2, 2);
 
@@ -432,7 +432,7 @@ public class AggregatingSignatureVerificationServiceTest {
     final long start = System.nanoTime();
     final CompletableFuture<List<SignatureTask>> batch =
         CompletableFuture.supplyAsync(service::waitForBatch);
-    Thread.sleep(100);
+    waitUntilFirstTaskTaken();
     executeValidVerify(1, 1);
     executeValidVerify(2, 2);
 
@@ -465,7 +465,7 @@ public class AggregatingSignatureVerificationServiceTest {
     try {
       final Future<List<SignatureTask>> worker1 = workers.submit(service::waitForBatch);
       final Future<List<SignatureTask>> worker2 = workers.submit(service::waitForBatch);
-      Thread.sleep(100);
+      waitUntilFirstTaskTaken();
       for (int i = 1; i < 5; i++) {
         executeValidVerify(i, i);
       }
@@ -492,7 +492,7 @@ public class AggregatingSignatureVerificationServiceTest {
     final long start = System.nanoTime();
     final CompletableFuture<List<SignatureTask>> batch =
         CompletableFuture.supplyAsync(service::waitForBatch);
-    Thread.sleep(100);
+    waitUntilFirstTaskTaken();
     executeUrgentValidVerify(1, 1);
 
     assertThat(batch.get(5, TimeUnit.SECONDS)).hasSize(2);
@@ -567,6 +567,14 @@ public class AggregatingSignatureVerificationServiceTest {
     final BLSSignature signature =
         useValidSignature ? BLS.sign(keypair.getSecretKey(), message) : BLSSignature.empty();
     return service.urgent().verify(keypair.getPublicKey(), message, signature);
+  }
+
+  /**
+   * The gathering worker takes the first task out of the queue before it starts waiting for more,
+   * so an empty queue means a gather is in progress and later submissions land inside it.
+   */
+  private void waitUntilFirstTaskTaken() {
+    Waiter.waitFor(() -> assertThat(service.batchSignatureTasks).isEmpty());
   }
 
   private AggregatingSignatureVerificationService createServiceWithGathering(

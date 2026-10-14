@@ -729,25 +729,23 @@ class AggregateAttestationValidatorTest {
             any(), any(), eq(OptionalInt.empty())))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResultWithState.accept(state)));
 
-    final RecordingSignatureVerifier localNormal = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier localUrgent = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier localVerifier = new RecordingSignatureVerifier();
     final AggregateAttestationValidator localValidator =
-        new AggregateAttestationValidator(spec, attestationValidator, localNormal, localUrgent);
+        new AggregateAttestationValidator(spec, attestationValidator, localVerifier);
     assertThat(
             localValidator.validate(ValidatableAttestation.aggregateFromValidator(spec, aggregate)))
         .isCompletedWithValue(InternalValidationResult.ACCEPT);
-    assertThat(localUrgent.getVerifyCount()).isEqualTo(1);
-    assertThat(localNormal.getVerifyCount()).isZero();
+    assertThat(localVerifier.urgent().getVerifyCount()).isEqualTo(1);
+    assertThat(localVerifier.getVerifyCount()).isZero();
 
     // Fresh validator so the seen-aggregate caches do not short-circuit the second validation
-    final RecordingSignatureVerifier networkNormal = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier networkUrgent = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier networkVerifier = new RecordingSignatureVerifier();
     final AggregateAttestationValidator networkValidator =
-        new AggregateAttestationValidator(spec, attestationValidator, networkNormal, networkUrgent);
+        new AggregateAttestationValidator(spec, attestationValidator, networkVerifier);
     assertThat(
             networkValidator.validate(ValidatableAttestation.aggregateFromNetwork(spec, aggregate)))
         .isCompletedWithValue(InternalValidationResult.ACCEPT);
-    assertThat(networkNormal.getVerifyCount()).isEqualTo(1);
-    assertThat(networkUrgent.getVerifyCount()).isZero();
+    assertThat(networkVerifier.getVerifyCount()).isEqualTo(1);
+    assertThat(networkVerifier.urgent().getVerifyCount()).isZero();
   }
 }

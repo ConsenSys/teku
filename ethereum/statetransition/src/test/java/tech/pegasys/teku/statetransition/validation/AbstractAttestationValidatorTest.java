@@ -19,7 +19,6 @@ import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -178,16 +177,9 @@ abstract class AbstractAttestationValidatorTest {
 
   @Test
   public void shouldUseUrgentVerifierOnlyForLocallyProducedAttestations() {
-    final RecordingSignatureVerifier normalVerifier = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier urgentVerifier = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier verifier = new RecordingSignatureVerifier();
     final AttestationValidator validator =
-        new AttestationValidator(
-            spec,
-            normalVerifier,
-            urgentVerifier,
-            gossipValidationHelper,
-            invalidBlockRoots,
-            Set.of());
+        new AttestationValidator(spec, verifier, gossipValidationHelper, invalidBlockRoots);
     final StateAndBlockSummary block = chainUpdater.advanceChain(UInt64.ONE);
     final UInt64 attestationSlot = UInt64.valueOf(2);
     chainUpdater.setCurrentSlot(attestationSlot);
@@ -196,8 +188,8 @@ abstract class AbstractAttestationValidatorTest {
 
     assertThat(validator.validate(ValidatableAttestation.fromValidator(spec, attestations.get(0))))
         .isCompletedWithValue(InternalValidationResult.ACCEPT);
-    assertThat(urgentVerifier.getVerifyCount()).isEqualTo(1);
-    assertThat(normalVerifier.getVerifyCount()).isZero();
+    assertThat(verifier.urgent().getVerifyCount()).isEqualTo(1);
+    assertThat(verifier.getVerifyCount()).isZero();
 
     assertThat(
             validator.validate(
@@ -206,7 +198,7 @@ abstract class AbstractAttestationValidatorTest {
                     attestations.get(1),
                     spec.computeSubnetForAttestation(block.getState(), attestations.get(1)))))
         .isCompletedWithValue(InternalValidationResult.ACCEPT);
-    assertThat(urgentVerifier.getVerifyCount()).isEqualTo(1);
-    assertThat(normalVerifier.getVerifyCount()).isEqualTo(1);
+    assertThat(verifier.urgent().getVerifyCount()).isEqualTo(1);
+    assertThat(verifier.getVerifyCount()).isEqualTo(1);
   }
 }

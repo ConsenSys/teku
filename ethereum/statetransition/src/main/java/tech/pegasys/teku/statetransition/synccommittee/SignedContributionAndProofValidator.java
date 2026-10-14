@@ -59,7 +59,6 @@ public class SignedContributionAndProofValidator {
       new SeenAggregatesCache<>(VALID_CONTRIBUTION_AND_PROOF_SET_SIZE);
   private final SyncCommitteeStateUtils syncCommitteeStateUtils;
   private final AsyncBLSSignatureVerifier signatureVerifier;
-  private final AsyncBLSSignatureVerifier urgentSignatureVerifier;
   private final GossipValidationHelper gossipValidationHelper;
 
   private final RecentChainData recentChainData;
@@ -70,30 +69,9 @@ public class SignedContributionAndProofValidator {
       final SyncCommitteeStateUtils syncCommitteeStateUtils,
       final AsyncBLSSignatureVerifier signatureVerifier,
       final GossipValidationHelper gossipValidationHelper) {
-    this(
-        spec,
-        recentChainData,
-        syncCommitteeStateUtils,
-        signatureVerifier,
-        signatureVerifier,
-        gossipValidationHelper);
-  }
-
-  /**
-   * @param urgentSignatureVerifier used for contributions produced by this node's own validators,
-   *     which must not be held back by batching delays before they are broadcast
-   */
-  public SignedContributionAndProofValidator(
-      final Spec spec,
-      final RecentChainData recentChainData,
-      final SyncCommitteeStateUtils syncCommitteeStateUtils,
-      final AsyncBLSSignatureVerifier signatureVerifier,
-      final AsyncBLSSignatureVerifier urgentSignatureVerifier,
-      final GossipValidationHelper gossipValidationHelper) {
     this.spec = spec;
     this.syncCommitteeStateUtils = syncCommitteeStateUtils;
     this.signatureVerifier = signatureVerifier;
-    this.urgentSignatureVerifier = urgentSignatureVerifier;
     this.recentChainData = recentChainData;
     this.gossipValidationHelper = gossipValidationHelper;
   }
@@ -179,7 +157,7 @@ public class SignedContributionAndProofValidator {
                   sourceUniquenessKey,
                   targetUniquenessKey,
                   maybeState.get(),
-                  producedLocally ? urgentSignatureVerifier : signatureVerifier);
+                  producedLocally ? signatureVerifier.urgent() : signatureVerifier);
             });
   }
 

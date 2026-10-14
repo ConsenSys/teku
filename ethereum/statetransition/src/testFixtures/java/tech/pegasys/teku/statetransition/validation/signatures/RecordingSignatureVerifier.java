@@ -22,14 +22,31 @@ import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 
-/** Verifies signatures synchronously and counts how many verify calls it received. */
+/**
+ * Verifies signatures synchronously and counts how many verify calls it received. Its {@link
+ * #urgent()} view is a separate recorder so tests can tell which of the two a caller used.
+ */
 public class RecordingSignatureVerifier implements AsyncBLSSignatureVerifier {
   private final AsyncBLSSignatureVerifier delegate =
       AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE);
   private final AtomicInteger verifyCount = new AtomicInteger();
+  private final RecordingSignatureVerifier urgent;
+
+  public RecordingSignatureVerifier() {
+    this(false);
+  }
+
+  private RecordingSignatureVerifier(final boolean isUrgentView) {
+    this.urgent = isUrgentView ? this : new RecordingSignatureVerifier(true);
+  }
 
   public int getVerifyCount() {
     return verifyCount.get();
+  }
+
+  @Override
+  public RecordingSignatureVerifier urgent() {
+    return urgent;
   }
 
   @Override

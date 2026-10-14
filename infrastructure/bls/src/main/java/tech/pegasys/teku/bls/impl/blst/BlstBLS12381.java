@@ -184,7 +184,7 @@ public class BlstBLS12381 implements BLS12381 {
     final ScaledSum sum =
         indices.collect(
             ScaledSum::new,
-            (acc, i) -> acc.add(scaleByRandomMultiplier(publicKeys.get(i), signatures.get(i))),
+            (acc, i) -> acc.addScaled(publicKeys.get(i), signatures.get(i)),
             ScaledSum::combine);
 
     if (!sum.isValid()) {
@@ -209,50 +209,30 @@ public class BlstBLS12381 implements BLS12381 {
   }
 
   /**
-   * Multiplies the aggregated public key and the signature by the same fresh random scalar, so that
-   * summing several such pairs over the same message is still a sound randomised batch check.
-   */
-  private ScaledPair scaleByRandomMultiplier(
-      final List<? extends PublicKey> publicKeys, final Signature signature) {
-    final BlstPublicKey aggrPubKey = aggregatePublicKeys(publicKeys);
-    if (aggrPubKey.isInfinity()) {
-      return ScaledPair.INVALID;
-    }
-    final BlstSignature blstSignature = BlstSignature.fromSignature(signature);
-    if (!blstSignature.ec2Point.in_group()) {
-      throw new BlsException("Error in Blst, error code: " + BLST_ERROR.BLST_POINT_NOT_IN_GROUP);
-    }
-    final BigInteger multiplier = nextBatchRandomMultiplier();
-    return new ScaledPair(
-        new P1(aggrPubKey.ecPoint).mult(multiplier),
-        new P2(blstSignature.ec2Point).mult(multiplier));
-  }
-
-  /** A (public key, signature) pair scaled by the same random multiplier. */
-  private record ScaledPair(P1 publicKey, P2 signature) {
-    static final ScaledPair INVALID = new ScaledPair(null, null);
-
-    boolean isValid() {
-      return publicKey != null;
-    }
-  }
-
-  /**
-   * Running sum of {@link ScaledPair}s. Not thread-safe: each thread of a parallel stream gets its
-   * own instance and the instances are merged with {@link #combine}.
+   * Running sum of (public key, signature) pairs, each pair scaled by the same fresh random
+   * multiplier so that summing several pairs over the same message is still a sound randomised
+   * batch check. Not thread-safe: each thread of a parallel stream gets its own instance and the
+   * instances are merged with {@link #combine}.
    */
   private static final class ScaledSum {
     private final P1 publicKey = new P1();
     private final P2 signature = new P2();
     private boolean valid = true;
 
-    void add(final ScaledPair pair) {
-      if (!pair.isValid()) {
+    void addScaled(final List<? extends PublicKey> publicKeys, final Signature signature) {
+      final BlstPublicKey aggrPubKey =
+          BlstPublicKey.aggregate(publicKeys.stream().map(BlstPublicKey::fromPublicKey).toList());
+      if (aggrPubKey.isInfinity()) {
         valid = false;
         return;
       }
-      publicKey.add(pair.publicKey());
-      signature.add(pair.signature());
+      final BlstSignature blstSignature = BlstSignature.fromSignature(signature);
+      if (!blstSignature.ec2Point.in_group()) {
+        throw new BlsException("Error in Blst, error code: " + BLST_ERROR.BLST_POINT_NOT_IN_GROUP);
+      }
+      final BigInteger multiplier = nextBatchRandomMultiplier();
+      this.publicKey.add(new P1(aggrPubKey.ecPoint).mult(multiplier));
+      this.signature.add(new P2(blstSignature.ec2Point).mult(multiplier));
     }
 
     void combine(final ScaledSum other) {

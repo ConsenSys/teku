@@ -384,35 +384,31 @@ class SignedContributionAndProofValidatorTest {
     final SignedContributionAndProof message =
         chainBuilder.createValidSignedContributionAndProofBuilder().build();
 
-    final RecordingSignatureVerifier localNormal = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier localUrgent = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier localVerifier = new RecordingSignatureVerifier();
     final SignedContributionAndProofValidator localValidator =
         new SignedContributionAndProofValidator(
             spec,
             storageSystem.recentChainData(),
             syncCommitteeStateUtils,
-            localNormal,
-            localUrgent,
+            localVerifier,
             new GossipValidationHelper(
                 spec, storageSystem.recentChainData(), storageSystem.getMetricsSystem()));
     assertThat(localValidator.validate(message, true)).isCompletedWithValue(ACCEPT);
-    assertThat(localUrgent.getVerifyCount()).isEqualTo(1);
-    assertThat(localNormal.getVerifyCount()).isZero();
+    assertThat(localVerifier.urgent().getVerifyCount()).isEqualTo(1);
+    assertThat(localVerifier.getVerifyCount()).isZero();
 
     // Fresh validator so the seen-contribution caches do not short-circuit the second validation
-    final RecordingSignatureVerifier networkNormal = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier networkUrgent = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier networkVerifier = new RecordingSignatureVerifier();
     final SignedContributionAndProofValidator networkValidator =
         new SignedContributionAndProofValidator(
             spec,
             storageSystem.recentChainData(),
             syncCommitteeStateUtils,
-            networkNormal,
-            networkUrgent,
+            networkVerifier,
             new GossipValidationHelper(
                 spec, storageSystem.recentChainData(), storageSystem.getMetricsSystem()));
     assertThat(networkValidator.validate(message, false)).isCompletedWithValue(ACCEPT);
-    assertThat(networkNormal.getVerifyCount()).isEqualTo(1);
-    assertThat(networkUrgent.getVerifyCount()).isZero();
+    assertThat(networkVerifier.getVerifyCount()).isEqualTo(1);
+    assertThat(networkVerifier.urgent().getVerifyCount()).isZero();
   }
 }

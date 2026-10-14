@@ -438,37 +438,33 @@ class SyncCommitteeMessageValidatorTest {
                 message.getValidatorIndex());
     final int validSubnetId = assignments.getAssignedSubcommittees().iterator().nextInt();
 
-    final RecordingSignatureVerifier localNormal = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier localUrgent = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier localVerifier = new RecordingSignatureVerifier();
     final SyncCommitteeMessageValidator localValidator =
         new SyncCommitteeMessageValidator(
             spec,
             recentChainData,
             new SyncCommitteeStateUtils(spec, recentChainData),
-            localNormal,
-            localUrgent,
+            localVerifier,
             gossipValidationHelper);
     assertThat(localValidator.validate(ValidatableSyncCommitteeMessage.fromValidator(message)))
         .isCompletedWithValue(ACCEPT);
-    assertThat(localUrgent.getVerifyCount()).isEqualTo(1);
-    assertThat(localNormal.getVerifyCount()).isZero();
+    assertThat(localVerifier.urgent().getVerifyCount()).isEqualTo(1);
+    assertThat(localVerifier.getVerifyCount()).isZero();
 
     // Fresh validator so the seen-message caches do not short-circuit the second validation
-    final RecordingSignatureVerifier networkNormal = new RecordingSignatureVerifier();
-    final RecordingSignatureVerifier networkUrgent = new RecordingSignatureVerifier();
+    final RecordingSignatureVerifier networkVerifier = new RecordingSignatureVerifier();
     final SyncCommitteeMessageValidator networkValidator =
         new SyncCommitteeMessageValidator(
             spec,
             recentChainData,
             new SyncCommitteeStateUtils(spec, recentChainData),
-            networkNormal,
-            networkUrgent,
+            networkVerifier,
             gossipValidationHelper);
     assertThat(
             networkValidator.validate(
                 ValidatableSyncCommitteeMessage.fromNetwork(message, validSubnetId)))
         .isCompletedWithValue(ACCEPT);
-    assertThat(networkNormal.getVerifyCount()).isEqualTo(1);
-    assertThat(networkUrgent.getVerifyCount()).isZero();
+    assertThat(networkVerifier.getVerifyCount()).isEqualTo(1);
+    assertThat(networkVerifier.urgent().getVerifyCount()).isZero();
   }
 }
