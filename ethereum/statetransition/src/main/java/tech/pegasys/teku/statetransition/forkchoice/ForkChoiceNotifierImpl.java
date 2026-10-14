@@ -386,16 +386,17 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
     if (hasPayloadAttributesForPinnedBlockProduction(
         productionForkChoiceUpdateData, forkChoiceState, requestedBlockProductionSlot)) {
-      // Reuse the payloadId requested by the ordinary fcU. If the EL answered that fcU without a
-      // payloadId (e.g. SYNCING), the reused result is unusable, so request a fresh one instead of
-      // failing block production with it.
+      // Reuse the payloadId requested by the ordinary fcU. If that fcU failed (e.g. EL error or
+      // timeout) or the EL answered it without a payloadId (e.g. SYNCING), the reused result is
+      // unusable, so request a fresh one instead of failing block production with it.
       productionForkChoiceUpdateData
           .getExecutionPayloadContext()
-          .thenComposeAsync(
-              maybeExecutionPayloadContext ->
-                  retryPinnedBlockProductionIfPayloadIdIsMissing(
-                      preparation, maybeExecutionPayloadContext),
-              eventThread)
+          .handleComposed(
+              (maybeExecutionPayloadContext, error) ->
+                  eventThread.executeFuture(
+                      () ->
+                          retryPinnedBlockProductionIfPayloadIdIsUnavailable(
+                              preparation, maybeExecutionPayloadContext, error)))
           .propagateTo(preparation.executionPayloadContext());
       sendForkChoiceUpdated(productionForkChoiceUpdateData);
     } else {
@@ -404,16 +405,28 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
   }
 
   private SafeFuture<Optional<ExecutionPayloadContext>>
-      retryPinnedBlockProductionIfPayloadIdIsMissing(
+      retryPinnedBlockProductionIfPayloadIdIsUnavailable(
           final PinnedBlockProductionPreparation preparation,
-          final Optional<ExecutionPayloadContext> maybeExecutionPayloadContext) {
+          final Optional<ExecutionPayloadContext> maybeExecutionPayloadContext,
+          final Throwable error) {
     eventThread.checkOnEventThread();
-    if (maybeExecutionPayloadContext.isPresent() || !isCurrentPinnedBlockProduction(preparation)) {
-      return SafeFuture.completedFuture(maybeExecutionPayloadContext);
+    if (!isCurrentPinnedBlockProduction(preparation)) {
+      return error == null
+          ? SafeFuture.completedFuture(maybeExecutionPayloadContext)
+          : SafeFuture.failedFuture(error);
     }
-    LOG.warn(
-        "Reused forkChoiceUpdated result for block production at slot {} has no payloadId, requesting a new one from the execution layer",
-        preparation.slot());
+    if (error != null) {
+      LOG.warn(
+          "Reused forkChoiceUpdated for block production at slot {} failed, requesting a new payloadId from the execution layer",
+          preparation.slot(),
+          error);
+    } else if (maybeExecutionPayloadContext.isPresent()) {
+      return SafeFuture.completedFuture(maybeExecutionPayloadContext);
+    } else {
+      LOG.warn(
+          "Reused forkChoiceUpdated result for block production at slot {} has no payloadId, requesting a new one from the execution layer",
+          preparation.slot());
+    }
     // The attributes are unchanged (same head and slot), so resend them as they are rather than
     // recalculating.
     final ForkChoiceUpdateData retryForkChoiceUpdateData =
@@ -437,14 +450,6 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
       final ForkChoiceState forkChoiceState, final UInt64 requestedBlockProductionSlot) {
     if (hasPayloadAttributesForPinnedBlockProduction(
         forkChoiceUpdateData, forkChoiceState, requestedBlockProductionSlot)) {
-      if (forkChoiceUpdateData.getExecutionPayloadContext().isCompletedExceptionally()) {
-        // The previous forkChoiceUpdated for these attributes failed (e.g. EL error or timeout).
-        // Reusing it would hand the same failure to this request, so send them again instead.
-        LOG.debug(
-            "Previous forkChoiceUpdated for block production at slot {} failed, resending",
-            requestedBlockProductionSlot);
-        return forkChoiceUpdateData.forResend();
-      }
       return forkChoiceUpdateData;
     }
 

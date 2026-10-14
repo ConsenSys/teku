@@ -1252,6 +1252,67 @@ class ForkChoiceNotifierTest {
   }
 
   @Test
+  void getPayloadId_shouldResendForkChoiceUpdatedWhenReusedInFlightResultFails() {
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final Bytes32 blockRoot = recentChainData.getBestBlockRoot().orElseThrow();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    final SafeFuture<ForkChoiceUpdatedResult> firstResponse = new SafeFuture<>();
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(firstResponse)
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(payloadId))));
+
+    // ordinary fcU with attributes still in flight when block production pins it
+    notifyForkChoiceUpdated(forkChoiceState);
+    notifyForkChoiceUpdated(
+        forkChoiceState, Optional.of(blockSlot), notification -> assertThat(notification).isNull());
+
+    final SafeFuture<Optional<ExecutionPayloadContext>> payloadContextFuture =
+        notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot);
+    assertThatSafeFuture(payloadContextFuture).isNotCompleted();
+
+    firstResponse.completeExceptionally(new RuntimeException("EL error"));
+
+    verify(executionLayerChannel, times(2))
+        .engineForkChoiceUpdated(forkChoiceState, Optional.of(payloadBuildingAttributes));
+    final ExecutionPayloadContext executionPayloadContext =
+        new ExecutionPayloadContext(payloadId, forkChoiceState, payloadBuildingAttributes);
+    assertThatSafeFuture(payloadContextFuture)
+        .isCompletedWithOptionalContaining(executionPayloadContext);
+  }
+
+  @Test
+  void getPayloadId_shouldResendForkChoiceUpdatedOnlyOnceWhenReusedResultFails() {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final Bytes32 blockRoot = recentChainData.getBestBlockRoot().orElseThrow();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(SafeFuture.failedFuture(new RuntimeException("EL error")));
+
+    notifyForkChoiceUpdated(forkChoiceState);
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(blockSlot));
+
+    verify(executionLayerChannel, times(2))
+        .engineForkChoiceUpdated(forkChoiceState, Optional.of(payloadBuildingAttributes));
+    assertThatSafeFuture(notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot))
+        .isCompletedExceptionallyWith(RuntimeException.class)
+        .hasMessageContaining("EL error");
+  }
+
+  @Test
   void getPayloadId_shouldFailAfterHeadAdvancementClearsPinnedBlockProduction() {
     final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
     final BeaconState headState = getHeadState();
