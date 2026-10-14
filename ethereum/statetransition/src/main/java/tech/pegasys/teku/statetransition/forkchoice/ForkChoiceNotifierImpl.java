@@ -614,6 +614,7 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
         .filter(
             preparation ->
                 preparation.matches(forkChoiceState.headBlock(), requestedBlockProductionSlot))
+        .filter(this::canReusePinnedBlockProduction)
         .isPresent()) {
       LOG.debug(
           "Keeping existing pinned block production for parent {} at slot {}",
@@ -694,6 +695,18 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
     } else {
       updatePayloadAttributesForPinnedBlockProduction(preparation);
     }
+  }
+
+  private boolean canReusePinnedBlockProduction(
+      final PinnedBlockProductionPreparation preparation) {
+    // Keep a pin that is still preparing (possibly with inclusion list payload attributes) or that
+    // already has a payloadId. Replace a pin that failed or has no payloadId, so a retried block
+    // production request sends a fresh forkChoiceUpdated instead of returning the same failure.
+    final SafeFuture<Optional<ExecutionPayloadContext>> executionPayloadContext =
+        preparation.executionPayloadContext();
+    return !executionPayloadContext.isDone()
+        || (executionPayloadContext.isCompletedNormally()
+            && executionPayloadContext.getImmediately().isPresent());
   }
 
   private SafeFuture<Optional<ExecutionPayloadContext>>
