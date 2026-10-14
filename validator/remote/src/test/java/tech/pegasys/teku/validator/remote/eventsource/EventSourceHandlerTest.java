@@ -309,6 +309,17 @@ class EventSourceHandlerTest {
   }
 
   @Test
+  void onError_shouldNotWarnWhenTheStreamDeliveredAHeadV2Event() throws Exception {
+    // once Gloas is scheduled the validator client subscribes to head_v2 instead of head
+    handler.onOpen();
+    handler.onMessage(EventType.head_v2.name(), headV2Event());
+
+    handler.onError(new IOException("connection reset"));
+
+    verify(validatorLogger, never()).noHeadEventsReceivedFromBeaconNodeEventStream(ENDPOINT);
+  }
+
+  @Test
   void onError_shouldNotBeSatisfiedByEventsOtherThanHeadEvents() throws Exception {
     final AttesterSlashingSchema attesterSlashingSchema =
         spec.getGenesisSchemaDefinitions().getAttesterSlashingSchema();
@@ -348,6 +359,21 @@ class EventSourceHandlerTest {
         spec,
         validatorLogger,
         ENDPOINT);
+  }
+
+  private MessageEvent headV2Event() throws Exception {
+    final HeadV2Event event =
+        new HeadV2Event(
+            new Data(
+                UInt64.valueOf(134),
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                false,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                false,
+                PayloadStatus.PAYLOAD_STATUS_PENDING.toString()));
+    return new MessageEvent(JsonUtil.serialize(event, HeadV2Event.TYPE_DEFINITION));
   }
 
   private MessageEvent headEvent() throws Exception {

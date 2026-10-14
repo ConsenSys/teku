@@ -55,11 +55,11 @@ class EventSourceHandler implements BackgroundEventHandler {
   private final AtomicBoolean connected = new AtomicBoolean(false);
 
   /**
-   * Whether the current connection has delivered a head event. A beacon node which does not accept
-   * the subscription still accepts the connection, so a stream which connects and then never
-   * delivers anything is the only symptom, and without this it would leave the validator client
-   * silently running on timer driven duties alone. A handler belongs to a single beacon node, so
-   * one node failing to deliver events says nothing about the others.
+   * Whether the current connection has delivered a head or head_v2 event. A beacon node which does
+   * not accept the subscription still accepts the connection, so a stream which connects and then
+   * never delivers anything is the only symptom, and without this it would leave the validator
+   * client silently running on timer driven duties alone. A handler belongs to a single beacon
+   * node, so one node failing to deliver events says nothing about the others.
    */
   private final AtomicBoolean headEventReceivedSinceConnected = new AtomicBoolean(false);
 
@@ -115,7 +115,7 @@ class EventSourceHandler implements BackgroundEventHandler {
     LOG.trace("Received {} event from beacon node {}", event, messageEvent.getOrigin());
     try {
       final EventType eventType = EventType.valueOf(event);
-      if (eventType == EventType.head) {
+      if (eventType == EventType.head || eventType == EventType.head_v2) {
         headEventReceivedSinceConnected.set(true);
       }
       switch (eventType) {
