@@ -351,10 +351,10 @@ public interface Database extends AutoCloseable {
    * persists their KZG proofs and drops the sidecars themselves, retaining only enough data to
    * reconstruct them on demand.
    *
-   * <p><b>Callers must submit small ranges.</b> There is no internal limit; the entire range is
-   * scanned in a single pass. Use {@link
-   * tech.pegasys.teku.storage.server.pruner.DataColumnSidecarPruner} which breaks the work into
-   * fixed-size chunks.
+   * <p><b>Callers must submit small ranges.</b> There is no internal limit: the entire range is
+   * scanned in a single pass and archived in a single write batch, so batching is up to the caller.
+   * Incomplete slots are skipped and may be completed later (e.g. by backfill), so a caller must
+   * not resume strictly after the last archived slot.
    */
   void archiveSidecarsProofs(UInt64 startSlot, UInt64 tillSlotInclusive);
 }

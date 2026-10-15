@@ -83,16 +83,20 @@ public class DataColumnSidecarsProofsSerializerTest {
   }
 
   @Test
-  final void testRaggedColumnsFailToDeserialize() {
-    // columns of unequal length leave a trailing partial column that cannot be regrouped by the
-    // uniform blob size written into the header
-    final List<List<KZGProof>> ragged =
+  final void testRaggedColumnsFailToSerialize() {
+    // the header stores only the first column's length: [[a], [b, c]] would otherwise round-trip
+    // silently as [[a], [b], [c]]
+    final List<List<KZGProof>> shorterFirst =
+        List.of(
+            List.of(dataStructureUtil.randomKZGProof()),
+            List.of(dataStructureUtil.randomKZGProof(), dataStructureUtil.randomKZGProof()));
+    final List<List<KZGProof>> longerFirst =
         List.of(
             List.of(dataStructureUtil.randomKZGProof(), dataStructureUtil.randomKZGProof()),
             List.of(dataStructureUtil.randomKZGProof()));
-    final byte[] serialize = serializer.serialize(ragged);
-    assertThatThrownBy(() -> serializer.deserialize(serialize))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Unexpected proofs found");
+    assertThatThrownBy(() -> serializer.serialize(shorterFirst))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> serializer.serialize(longerFirst))
+        .isInstanceOf(IllegalArgumentException.class);
   }
 }

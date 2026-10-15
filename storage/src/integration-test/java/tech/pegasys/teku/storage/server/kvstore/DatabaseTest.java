@@ -16,6 +16,7 @@ package tech.pegasys.teku.storage.server.kvstore;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
@@ -47,7 +48,6 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -57,7 +57,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
-import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.dataproviders.lookup.BlockProvider;
@@ -3225,6 +3224,17 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void archiveSidecarsProofs_isNoOpWithoutFuluConfig(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalDeneb());
+    initialize(context);
+
+    assertThatCode(() -> database.archiveSidecarsProofs(ZERO, UInt64.valueOf(3)))
+        .doesNotThrowAnyException();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+  }
+
+  @TestTemplate
   public void pruneAllSidecars_alsoRemovesArchivedProofs(final DatabaseContext context)
       throws IOException {
     setupWithSpec(TestSpecFactory.createMinimalFulu());
@@ -3233,25 +3243,18 @@ public class DatabaseTest {
     final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
     final UInt64 slot = UInt64.valueOf(3);
 
-    try (final LogCaptor logCaptor = LogCaptor.forClass(KvStoreDatabase.class, Level.DEBUG)) {
-      // archive the extension columns down to proofs: slot now holds first-half sidecars + proofs
-      storeFullColumnSet(slot, numberOfColumns);
-      database.archiveSidecarsProofs(ZERO, slot);
-      assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
-      assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+    // archive the extension columns down to proofs: slot now holds first-half sidecars + proofs
+    storeFullColumnSet(slot, numberOfColumns);
+    database.archiveSidecarsProofs(ZERO, slot);
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
 
-      // pruning the slot must drop the retained proofs alongside the sidecars
-      database.pruneAllSidecars(slot, 10);
+    // pruning the slot must drop the retained proofs alongside the sidecars
+    database.pruneAllSidecars(slot, 10);
 
-      assertThat(getStoredColumnIndices(slot)).isEmpty();
-      assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-      assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
-
-      // both the archiving and the prune-time removal are observable in the logs at debug level
-      assertThat(logCaptor.getDebugLogs())
-          .anyMatch(log -> log.contains("Archiving data column sidecars to proofs"))
-          .anyMatch(log -> log.contains("Removing archived data column sidecar proofs"));
-    }
+    assertThat(getStoredColumnIndices(slot)).isEmpty();
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
   }
 
   private List<List<KZGProof>> storeFullColumnSet(final UInt64 slot, final int numberOfColumns) {

@@ -1433,6 +1433,9 @@ public class KvStoreDatabase implements Database {
 
   @Override
   public void archiveSidecarsProofs(final UInt64 startSlot, final UInt64 tillSlotInclusive) {
+    if (getFirstDataColumnSidecarSlot().isEmpty()) {
+      return;
+    }
     // Extension columns (indices >= NUMBER_OF_COLUMNS / 2) are the reconstructable half whose
     // proofs we retain while dropping the columns themselves.
     final int numberOfColumns =
@@ -1586,7 +1589,7 @@ public class KvStoreDatabase implements Database {
         final List<UInt64> prunedSlots =
             toPrune.keys().stream().map(DataColumnSlotAndIdentifier::slot).distinct().toList();
         LOG.debug(
-            "Removing archived data column sidecar proofs for {} pruned canonical slots ({}..{})",
+            "Removing any archived data column sidecar proofs for {} pruned canonical slots ({}..{})",
             prunedSlots.size(),
             prunedSlots.getFirst(),
             prunedSlots.getLast());
