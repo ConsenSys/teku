@@ -143,6 +143,7 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
         new BlockGossipManager(
             recentChainData,
             spec,
+            metricsSystem,
             asyncRunner,
             discoveryNetwork,
             gossipEncoding,

@@ -24,6 +24,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding.ForkDigestToMilestone;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopics;
 import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage;
+import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage.DecodedMessagePrefix;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 
@@ -31,8 +32,12 @@ import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
  * {@link PreparedGossipMessage} implementation which calculates Gossip 'message-id' according to
  * Eth2 spec based on uncompressed gossip message payload: <code>
  *   SHA256(MESSAGE_DOMAIN_VALID_SNAPPY + snappy_decompress(message.data))[:20]
- * </code> The message payload is uncompressed lazily and cached for the final message handling:
- * {@link tech.pegasys.teku.networking.p2p.gossip.TopicHandler#handleMessage(PreparedGossipMessage)}
+ * </code>
+ *
+ * <p>Only the compressed payload is kept. The uncompressed payload used for the message id is
+ * dropped once the id and the {@link DecodedMessagePrefix} are computed, and the payload is
+ * uncompressed again when the message is decoded, so messages waiting to be processed don't hold
+ * the uncompressed payload, which can be many times larger.
  */
 class SnappyPreparedGossipMessage implements PreparedGossipMessage {
   private final Bytes compressedData;
@@ -42,8 +47,8 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
   private final NetworkingSpecConfig networkingConfig;
   private final Optional<UInt64> arrivalTimestamp;
 
-  private final Supplier<DecodedMessageResult> decodedResult =
-      Suppliers.memoize(this::decodeMessage);
+  private final Supplier<MessageIdAndPrefix> messageIdAndPrefix =
+      Suppliers.memoize(this::computeMessageIdAndPrefix);
 
   static SnappyPreparedGossipMessage createUnknown(
       final String topic,
@@ -118,12 +123,9 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
     }
   }
 
+  /** Uncompresses the payload again on each call, so callers should only call it once. */
   @Override
   public DecodedMessageResult getDecodedMessage() {
-    return decodedResult.get();
-  }
-
-  private DecodedMessageResult decodeMessage() {
     try {
       if (valueType == null) {
         return DecodedMessageResult.failed();
@@ -141,10 +143,6 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
     return compressedData;
   }
 
-  private Optional<Bytes> getUncompressed() {
-    return getDecodedMessage().getDecodedMessage();
-  }
-
   private Bytes uncompressPayload(final long maxUncompressedLength) throws DecodingException {
     return snappyCompressor.uncompress(
         compressedData, valueType.getNetworkSszLengthBounds(), maxUncompressedLength);
@@ -152,15 +150,30 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
 
   @Override
   public Bytes getMessageId() {
-    return getUncompressed()
-        .map(messageIdCalculator::getValidMessageId)
-        .orElseGet(messageIdCalculator::getInvalidMessageId);
+    return messageIdAndPrefix.get().messageId();
+  }
+
+  @Override
+  public Optional<DecodedMessagePrefix> getDecodedMessagePrefix() {
+    return messageIdAndPrefix.get().decodedMessagePrefix();
+  }
+
+  private MessageIdAndPrefix computeMessageIdAndPrefix() {
+    final Optional<Bytes> uncompressed = getDecodedMessage().getDecodedMessage();
+    return new MessageIdAndPrefix(
+        uncompressed
+            .map(messageIdCalculator::getValidMessageId)
+            .orElseGet(messageIdCalculator::getInvalidMessageId),
+        uncompressed.map(DecodedMessagePrefix::of));
   }
 
   @Override
   public Optional<UInt64> getArrivalTimestamp() {
     return arrivalTimestamp;
   }
+
+  private record MessageIdAndPrefix(
+      Bytes messageId, Optional<DecodedMessagePrefix> decodedMessagePrefix) {}
 
   @FunctionalInterface
   interface Uncompressor {

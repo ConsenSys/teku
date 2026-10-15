@@ -85,6 +85,17 @@ public class GossipValidationHelper {
   }
 
   /**
+   * Returns true when the slot is more than {@code tolerance} slots after the current slot, with
+   * the same clock disparity allowance as {@link #isSlotFromFuture(UInt64)}.
+   */
+  public boolean isSlotBeyondFutureTolerance(final UInt64 slot, final UInt64 tolerance) {
+    final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
+    final UInt64 maxCurrSlot =
+        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
+    return slot.isGreaterThan(maxCurrSlot.plus(tolerance));
+  }
+
+  /**
    * Returns true when the proposer for {@code proposalSlot} is known, which happens once the
    * lookahead epoch has started.
    */

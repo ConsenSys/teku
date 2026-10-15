@@ -15,9 +15,11 @@ package tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers;
 
 import static tech.pegasys.teku.infrastructure.logging.P2PLogger.P2P_LOG;
 
+import com.google.common.base.Suppliers;
 import io.libp2p.core.pubsub.ValidationResult;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -39,6 +41,7 @@ import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopics;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationValidator;
 import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage;
+import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage.DecodedMessagePrefix;
 import tech.pegasys.teku.networking.p2p.gossip.TopicHandler;
 import tech.pegasys.teku.networking.p2p.libp2p.config.LibP2PParamsFactory;
 import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
@@ -59,6 +62,8 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
   private final NetworkingSpecConfig networkingConfig;
   private final DebugDataDumper debugDataDumper;
   private final String topic;
+  private final DecodedPrefixFilter decodedPrefixFilter;
+  private final Optional<GossipInFlightLimiter> inFlightLimiter;
   final TimeProvider timeProvider;
 
   // every slot of mainnet config
@@ -75,6 +80,42 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
       final SszSchema<MessageT> messageType,
       final NetworkingSpecConfig networkingConfig,
       final DebugDataDumper debugDataDumper) {
+    this(
+        recentChainData,
+        asyncRunner,
+        processor,
+        gossipEncoding,
+        forkDigest,
+        topicName,
+        forkValidator,
+        messageType,
+        networkingConfig,
+        debugDataDumper,
+        DecodedPrefixFilter.ACCEPT_ALL,
+        Optional.empty());
+  }
+
+  /**
+   * @param decodedPrefixFilter checked on the gossipsub thread before a message is queued, any
+   *     message it doesn't accept is ignored without being decoded
+   * @param inFlightLimiter limits the total uncompressed size of the messages that are queued or
+   *     being processed, any message over the limit is ignored without being decoded
+   */
+  public Eth2TopicHandler(
+      final RecentChainData recentChainData,
+      final AsyncRunner asyncRunner,
+      final OperationProcessor<MessageT> processor,
+      final GossipEncoding gossipEncoding,
+      final Bytes4 forkDigest,
+      final String topicName,
+      final OperationValidator<MessageT> forkValidator,
+      final SszSchema<MessageT> messageType,
+      final NetworkingSpecConfig networkingConfig,
+      final DebugDataDumper debugDataDumper,
+      final DecodedPrefixFilter decodedPrefixFilter,
+      final Optional<GossipInFlightLimiter> inFlightLimiter) {
+    this.decodedPrefixFilter = decodedPrefixFilter;
+    this.inFlightLimiter = inFlightLimiter;
     this.asyncRunner = asyncRunner;
     this.processor = processor;
     this.gossipEncoding = gossipEncoding;
@@ -116,6 +157,37 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
 
   @Override
   public SafeFuture<ValidationResult> handleMessage(final PreparedGossipMessage message) {
+    // kept from computing the message id, so this doesn't uncompress the payload again
+    final Optional<DecodedMessagePrefix> decodedMessagePrefix = message.getDecodedMessagePrefix();
+    // a message that can't be uncompressed is still queued, so decoding rejects it
+    if (decodedMessagePrefix.isPresent()
+        && !decodedPrefixFilter.shouldProcess(decodedMessagePrefix.get().prefix())) {
+      LOG.trace("Ignoring message for topic {} before decoding it", this::getTopic);
+      return SafeFuture.completedFuture(ValidationResult.Ignore);
+    }
+    if (inFlightLimiter.isEmpty()) {
+      return queueForProcessing(message);
+    }
+    final GossipInFlightLimiter limiter = inFlightLimiter.get();
+    final long messageBytes =
+        decodedMessagePrefix
+            .map(DecodedMessagePrefix::decodedSize)
+            .orElseGet(() -> message.getOriginalMessage().size());
+    if (!limiter.tryAcquire(messageBytes)) {
+      loggerThrottler.invoke(
+          timeProvider.getTimeInSeconds(),
+          (log) ->
+              log.warn(
+                  "Discarding gossip message for topic {} because messages already being processed"
+                      + " for the topic are over the {} bytes limit",
+                  getTopic(),
+                  limiter.getMaxInFlightBytes()));
+      return SafeFuture.completedFuture(ValidationResult.Ignore);
+    }
+    return queueForProcessing(message).alwaysRun(() -> limiter.release(messageBytes));
+  }
+
+  private SafeFuture<ValidationResult> queueForProcessing(final PreparedGossipMessage message) {
     // SSZ decode on the async runner to avoid blocking the single gossipsub event thread
     return asyncRunner
         .runAsync(
@@ -143,15 +215,17 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
       final PreparedGossipMessage message) {
     switch (internalValidationResult.code()) {
       case REJECT -> {
+        // the prepared message doesn't keep the uncompressed payload, so only uncompress it once
+        final Supplier<Bytes> decodedMessage =
+            Suppliers.memoize(
+                () -> message.getDecodedMessage().getDecodedMessage().orElse(Bytes.EMPTY));
         debugDataDumper.saveGossipRejectedMessage(
             getTopic(),
             message.getArrivalTimestamp(),
-            () -> message.getDecodedMessage().getDecodedMessage().orElse(Bytes.EMPTY),
+            decodedMessage,
             internalValidationResult.getDescription());
         P2P_LOG.onGossipRejected(
-            getTopic(),
-            message.getDecodedMessage().getDecodedMessage().orElse(Bytes.EMPTY),
-            internalValidationResult.getDescription());
+            getTopic(), decodedMessage, internalValidationResult.getDescription());
       }
       case IGNORE -> LOG.trace("Ignoring message for topic: {}", this::getTopic);
       case SAVE_FOR_FUTURE -> LOG.trace("Deferring message for topic: {}", this::getTopic);

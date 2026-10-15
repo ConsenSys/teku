@@ -147,6 +147,35 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isSlotBeyondFutureTolerance_shouldComputeCorrectly() {
+    final UInt64 tolerance = UInt64.valueOf(2);
+    final UInt64 slot4 = UInt64.valueOf(4);
+
+    storageSystem.chainUpdater().setCurrentSlot(UInt64.ONE);
+    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(UInt64.valueOf(3), tolerance))
+        .isFalse();
+    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(slot4, tolerance)).isTrue();
+    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(UInt64.MAX_VALUE, tolerance))
+        .isTrue();
+
+    final UInt64 slot2TimeMillis =
+        spec.computeTimeMillisAtSlot(
+            UInt64.valueOf(2),
+            secondsToMillis(
+                recentChainData.getBestState().orElseThrow().getImmediately().getGenesisTime()));
+
+    final UInt64 notYetInsideTolerance =
+        slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis()).decrement();
+    storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
+    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(slot4, tolerance)).isTrue();
+
+    final UInt64 insideTolerance =
+        slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
+    storageSystem.chainUpdater().setTimeMillis(insideTolerance);
+    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(slot4, tolerance)).isFalse();
+  }
+
+  @TestTemplate
   void isWithinProposerLookahead_shouldComputeCorrectly() {
     final UInt64 proposalSlot = UInt64.valueOf(100);
     final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
