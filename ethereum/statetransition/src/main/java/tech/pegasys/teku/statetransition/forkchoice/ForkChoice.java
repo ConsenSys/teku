@@ -1318,6 +1318,12 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
   private void applyPayloadAttestationFromBlock(
       final BeaconState postState, final PayloadAttestation payloadAttestation) {
+    if (recentChainData
+        .getSlotForBlockRoot(payloadAttestation.getData().getBeaconBlockRoot())
+        .filter(payloadAttestation.getData().getSlot()::equals)
+        .isEmpty()) {
+      return;
+    }
     getPayloadAttestationMessagesFromBlock(postState, payloadAttestation)
         .forEach(
             validatableMessage -> {

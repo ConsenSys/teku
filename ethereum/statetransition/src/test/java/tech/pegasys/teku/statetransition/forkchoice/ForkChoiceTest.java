@@ -53,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
 import org.mockito.stubbing.Stubber;
@@ -731,8 +732,10 @@ class ForkChoiceTest {
         .isEqualTo(IntSet.of(0, 2, 4));
   }
 
-  @Test
-  void payloadAttestationsFromBlock_shouldCountVotesWhenParentStateIsEvicted() {
+  @ParameterizedTest
+  @ValueSource(ints = {2, 3})
+  void payloadAttestationsFromBlock_shouldOnlyCountVotesForParentSlotWhenStateIsEvicted(
+      final int childSlot) {
     setupWithSpec(
         TestSpecFactory.createMinimalGloas(
             builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)),
@@ -745,20 +748,23 @@ class ForkChoiceTest {
 
     final SchemaDefinitionsGloas schemas =
         SchemaDefinitionsGloas.required(spec.atSlot(ONE).getSchemaDefinitions());
+    final UInt64 attestationSlot = UInt64.valueOf(childSlot - 1);
     final PayloadAttestation payloadAttestation =
         schemas
             .getPayloadAttestationSchema()
             .create(
                 schemas.getPayloadAttestationSchema().getAggregationBitsSchema().ofBits(0),
-                schemas.getPayloadAttestationDataSchema().create(parent.getRoot(), ONE, true, true),
+                schemas
+                    .getPayloadAttestationDataSchema()
+                    .create(parent.getRoot(), attestationSlot, true, true),
                 BLSSignature.empty());
     final SignedBlockAndState child =
         chainBuilder.generateBlockAtSlot(
-            UInt64.valueOf(2),
+            UInt64.valueOf(childSlot),
             BlockOptions.create()
                 .setPayloadAttestations(
                     BeaconBlockBodySchemaGloas.required(
-                            spec.atSlot(UInt64.valueOf(2))
+                            spec.atSlot(UInt64.valueOf(childSlot))
                                 .getSchemaDefinitions()
                                 .getBeaconBlockBodySchema())
                         .getPayloadAttestationsSchema()
@@ -767,15 +773,15 @@ class ForkChoiceTest {
     importBlock(child);
 
     assertThat(recentChainData.getStore().getBlockStateIfAvailable(parent.getRoot())).isEmpty();
-    final IntList ptc = spec.getPtc(child.getState(), ONE);
-    final long expectedPositions = ptc.intStream().filter(index -> index == ptc.getInt(0)).count();
-    assertThat(expectedPositions).isPositive();
+    final IntList ptc = spec.getPtc(child.getState(), attestationSlot);
+    final long matchingPositions = ptc.intStream().filter(index -> index == ptc.getInt(0)).count();
+    assertThat(matchingPositions).isPositive();
     assertThat(
             recentChainData
                 .getUpdatableForkChoiceStrategy()
                 .orElseThrow()
                 .getPayloadAttesterCount(parent.getRoot()))
-        .isEqualTo(UInt64.valueOf(expectedPositions));
+        .isEqualTo(UInt64.valueOf(childSlot == 2 ? matchingPositions : 0));
   }
 
   @Test
