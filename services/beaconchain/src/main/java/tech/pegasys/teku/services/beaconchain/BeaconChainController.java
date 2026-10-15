@@ -594,7 +594,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
         parentExecutionPayloadDependency ->
             recentExecutionPayloadsFetcher.requestRecentExecutionPayload(
                 parentExecutionPayloadDependency.parentBeaconBlockRoot()));
-    eventChannels.subscribe(ReceivedBlockEventsChannel.class, recentExecutionPayloadsFetcher);
     eventChannels.subscribe(
         ReceivedExecutionPayloadEventsChannel.class, recentExecutionPayloadsFetcher);
 
