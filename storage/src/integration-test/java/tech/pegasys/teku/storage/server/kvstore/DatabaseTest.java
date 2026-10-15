@@ -3150,6 +3150,81 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void archiveSidecarsProofs_archivesOnlyCompleteBlockColumns(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final SignedBeaconBlockHeader completeHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    final List<List<KZGProof>> expectedExtensionProofs =
+        storeFullColumnSet(completeHeader, numberOfColumns);
+    // leftover extension columns of a never-imported block at the same slot
+    final SignedBeaconBlockHeader strayHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    storeColumns(strayHeader, halfColumns, halfColumns + halfColumns / 2);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // the complete block is archived with its own proofs only
+    assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
+    assertThat(getStoredColumnIndices(slot, completeHeader.getMessage().getRoot()))
+        .containsExactlyElementsOf(
+            Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
+    // the stray block's columns are left untouched
+    assertThat(getStoredColumnIndices(slot, strayHeader.getMessage().getRoot()))
+        .hasSize(halfColumns / 2);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_doesNotMixExtensionColumnsOfDifferentRoots(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final int splitIndex = halfColumns + halfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // one block has the first half and part of the extension half, another block the remaining
+    // extension columns: together they would look like a complete slot
+    storeColumns(dataStructureUtil.randomSignedBeaconBlockHeader(slot), 0, splitIndex);
+    storeColumns(
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot), splitIndex, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_skipsSlotWithMultipleCompleteBlocks(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // proofs are stored per slot, so only one block's proofs could be retained
+    storeFullColumnSet(dataStructureUtil.randomSignedBeaconBlockHeader(slot), numberOfColumns);
+    storeFullColumnSet(dataStructureUtil.randomSignedBeaconBlockHeader(slot), numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(2 * numberOfColumns);
+  }
+
+  @TestTemplate
   public void pruneAllSidecars_alsoRemovesArchivedProofs(final DatabaseContext context)
       throws IOException {
     setupWithSpec(TestSpecFactory.createMinimalFulu());
@@ -3180,7 +3255,12 @@ public class DatabaseTest {
   }
 
   private List<List<KZGProof>> storeFullColumnSet(final UInt64 slot, final int numberOfColumns) {
-    final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    return storeFullColumnSet(
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot), numberOfColumns);
+  }
+
+  private List<List<KZGProof>> storeFullColumnSet(
+      final SignedBeaconBlockHeader header, final int numberOfColumns) {
     final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
     final List<DataColumnSidecar> sidecars =
         Stream.iterate(ZERO, UInt64::increment)
@@ -3203,6 +3283,26 @@ public class DatabaseTest {
             dataStructureUtil.randomKZGCommitments(14).stream()
                 .map(SszKZGCommitment::new)
                 .toList());
+  }
+
+  private void storeColumns(
+      final SignedBeaconBlockHeader header, final int fromIndex, final int toIndexExclusive) {
+    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
+    Stream.iterate(UInt64.valueOf(fromIndex), UInt64::increment)
+        .limit(toIndexExclusive - fromIndex)
+        .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
+        .forEach(database::addSidecar);
+  }
+
+  private List<UInt64> getStoredColumnIndices(final UInt64 slot, final Bytes32 blockRoot) {
+    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
+        database.streamDataColumnIdentifiers(slot, slot)) {
+      return identifiers
+          .filter(id -> id.blockRoot().equals(blockRoot))
+          .map(DataColumnSlotAndIdentifier::columnIndex)
+          .sorted()
+          .toList();
+    }
   }
 
   private List<UInt64> getStoredColumnIndices(final UInt64 slot) {

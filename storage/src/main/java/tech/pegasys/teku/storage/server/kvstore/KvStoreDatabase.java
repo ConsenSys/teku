@@ -1435,13 +1435,13 @@ public class KvStoreDatabase implements Database {
   public void archiveSidecarsProofs(final UInt64 startSlot, final UInt64 tillSlotInclusive) {
     // Extension columns (indices >= NUMBER_OF_COLUMNS / 2) are the reconstructable half whose
     // proofs we retain while dropping the columns themselves.
-    final int halfColumns =
+    final int numberOfColumns =
         spec.getNumberOfDataColumns()
-                .orElseThrow(
-                    () ->
-                        new IllegalStateException(
-                            "Cannot archive data column sidecar proofs before the Fulu milestone"))
-            / 2;
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Cannot archive data column sidecar proofs before the Fulu milestone"));
+    final int halfColumns = numberOfColumns / 2;
     try (final Stream<DataColumnSlotAndIdentifier> dataColumnSidecars =
         streamDataColumnIdentifiers(startSlot, tillSlotInclusive)) {
 
@@ -1461,29 +1461,31 @@ public class KvStoreDatabase implements Database {
             slots.getLast());
         try (final FinalizedUpdater updater = finalizedUpdater()) {
           for (final UInt64 slot : slots) {
-            final List<DataColumnSlotAndIdentifier> extensionKeys =
+            // The canonical sidecar table may also hold columns of a never-imported block at this
+            // slot, so columns are grouped by block root and only a block with every column is
+            // archived: first-half columns are required for reconstruction and columns of
+            // different blocks must never be mixed. Proofs are stored per slot, so the slot is
+            // skipped unless exactly one block is complete.
+            final List<List<DataColumnSlotAndIdentifier>> completeBlocks =
                 archiveMap.get(slot).stream()
+                    .collect(Collectors.groupingBy(DataColumnSlotAndIdentifier::blockRoot))
+                    .values()
+                    .stream()
+                    .filter(keys -> keys.size() == numberOfColumns)
+                    .toList();
+            if (completeBlocks.size() != 1) {
+              LOG.trace(
+                  "Skipping archival for slot {}: {} blocks have all {} columns",
+                  slot,
+                  completeBlocks.size(),
+                  numberOfColumns);
+              continue;
+            }
+            final List<DataColumnSlotAndIdentifier> extensionKeys =
+                completeBlocks.getFirst().stream()
                     .filter(id -> id.columnIndex().isGreaterThanOrEqualTo(halfColumns))
                     .sorted()
                     .toList();
-            final long firstHalfCount =
-                archiveMap.get(slot).stream()
-                    .filter(id -> id.columnIndex().isLessThan(halfColumns))
-                    .count();
-
-            // Skip slots where either half is incomplete: first-half columns are required for
-            // reconstruction, and archiving extension columns without them would make the archived
-            // data irrecoverable.
-            if (extensionKeys.size() != halfColumns || firstHalfCount != halfColumns) {
-              LOG.trace(
-                  "Skipping archival for slot {}: have {}/{} extension and {}/{} first-half columns",
-                  slot,
-                  extensionKeys.size(),
-                  halfColumns,
-                  firstHalfCount,
-                  halfColumns);
-              continue;
-            }
 
             final List<DataColumnSidecar> sidecars = new ArrayList<>();
 
