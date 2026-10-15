@@ -66,10 +66,8 @@ import tech.pegasys.teku.ethereum.pow.api.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.kzg.KZGCommitment;
 import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -97,7 +95,6 @@ import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.generator.ChainProperties;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.api.FinalizedChainData;
 import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
@@ -3028,12 +3025,8 @@ public class DatabaseTest {
 
     final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader();
     // we need to build sidecars with the same number of cells in each
-    final List<KZGCommitment> kzgCommitments = dataStructureUtil.randomKZGCommitments(14);
     final SszList<SszKZGCommitment> sszKZGCommitments =
-        SchemaDefinitionsFulu.required(spec.forMilestone(SpecMilestone.FULU).getSchemaDefinitions())
-            .getDataColumnSidecarSchema()
-            .getKzgCommitmentsSchema()
-            .createFromElements(kzgCommitments.stream().map(SszKZGCommitment::new).toList());
+        dataStructureUtil.randomBlobKzgCommitments(14);
     final List<DataColumnSidecar> dataColumnSidecarsExtension =
         Stream.iterate(UInt64.valueOf(64), UInt64::increment)
             .limit(64)
@@ -3107,13 +3100,8 @@ public class DatabaseTest {
     final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
     final UInt64 slot = UInt64.valueOf(3);
 
-    final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader(slot);
-    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
     // store every column except the last extension one, so the extension half is incomplete
-    Stream.iterate(ZERO, UInt64::increment)
-        .limit(numberOfColumns - 1L)
-        .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
-        .forEach(database::addSidecar);
+    storeColumns(dataStructureUtil.randomSignedBeaconBlockHeader(slot), 0, numberOfColumns - 1);
 
     database.archiveSidecarsProofs(ZERO, slot);
 
@@ -3132,13 +3120,8 @@ public class DatabaseTest {
     final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
     final UInt64 slot = UInt64.valueOf(3);
 
-    final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader(slot);
-    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
     // store all columns except index 0 (one first-half gap) — a single gap must prevent archiving
-    Stream.iterate(UInt64.ONE, UInt64::increment)
-        .limit(numberOfColumns - 1L)
-        .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
-        .forEach(database::addSidecar);
+    storeColumns(dataStructureUtil.randomSignedBeaconBlockHeader(slot), 1, numberOfColumns);
 
     database.archiveSidecarsProofs(ZERO, slot);
 
@@ -3235,6 +3218,88 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void archiveSidecarsProofs_archivesCompleteSlotsAroundIncompleteOne(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 firstSlot = UInt64.valueOf(1);
+    final UInt64 incompleteSlot = UInt64.valueOf(2);
+    final UInt64 lastSlot = UInt64.valueOf(3);
+
+    final List<List<KZGProof>> firstProofs = storeFullColumnSet(firstSlot, numberOfColumns);
+    storeColumns(
+        dataStructureUtil.randomSignedBeaconBlockHeader(incompleteSlot), 0, numberOfColumns - 1);
+    final List<List<KZGProof>> lastProofs = storeFullColumnSet(lastSlot, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, lastSlot);
+
+    assertThat(database.getDataColumnSidecarsProofs(firstSlot)).contains(firstProofs);
+    assertThat(getStoredColumnIndices(firstSlot)).hasSize(halfColumns);
+    // the incomplete slot is skipped without stopping the run
+    assertThat(database.getDataColumnSidecarsProofs(incompleteSlot)).isEmpty();
+    assertThat(getStoredColumnIndices(incompleteSlot)).hasSize(numberOfColumns - 1);
+    assertThat(database.getDataColumnSidecarsProofs(lastSlot)).contains(lastProofs);
+    assertThat(getStoredColumnIndices(lastSlot)).hasSize(halfColumns);
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(lastSlot);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_isNoOpForAlreadyArchivedSlot(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final List<List<KZGProof>> expectedExtensionProofs = storeFullColumnSet(slot, numberOfColumns);
+    database.archiveSidecarsProofs(ZERO, slot);
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
+    assertThat(getStoredColumnIndices(slot))
+        .containsExactlyElementsOf(
+            Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_leavesNonCanonicalSidecarsUntouched(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    storeFullColumnSet(slot, numberOfColumns);
+    final SignedBeaconBlockHeader nonCanonicalHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    final SszList<SszKZGCommitment> kzgCommitments = dataStructureUtil.randomBlobKzgCommitments(14);
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      Stream.iterate(ZERO, UInt64::increment)
+          .limit(numberOfColumns)
+          .map(
+              index ->
+                  dataStructureUtil.randomDataColumnSidecar(
+                      nonCanonicalHeader, kzgCommitments, index))
+          .forEach(updater::addNonCanonicalSidecar);
+      updater.commit();
+    }
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
+    try (final Stream<DataColumnSlotAndIdentifier> nonCanonical =
+        database.streamNonCanonicalDataColumnIdentifiers(slot, slot)) {
+      assertThat(nonCanonical).hasSize(numberOfColumns);
+    }
+  }
+
+  @TestTemplate
   public void pruneAllSidecars_alsoRemovesArchivedProofs(final DatabaseContext context)
       throws IOException {
     setupWithSpec(TestSpecFactory.createMinimalFulu());
@@ -3264,37 +3329,25 @@ public class DatabaseTest {
 
   private List<List<KZGProof>> storeFullColumnSet(
       final SignedBeaconBlockHeader header, final int numberOfColumns) {
-    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
-    final List<DataColumnSidecar> sidecars =
-        Stream.iterate(ZERO, UInt64::increment)
-            .limit(numberOfColumns)
-            .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
-            .toList();
-    sidecars.forEach(database::addSidecar);
-    return sidecars.stream()
+    return storeColumns(header, 0, numberOfColumns).stream()
         .skip(numberOfColumns / 2)
         .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
         .toList();
   }
 
-  private SszList<SszKZGCommitment> randomFuluKzgCommitments() {
-    return SchemaDefinitionsFulu.required(
-            spec.forMilestone(SpecMilestone.FULU).getSchemaDefinitions())
-        .getDataColumnSidecarSchema()
-        .getKzgCommitmentsSchema()
-        .createFromElements(
-            dataStructureUtil.randomKZGCommitments(14).stream()
-                .map(SszKZGCommitment::new)
-                .toList());
-  }
-
-  private void storeColumns(
+  private List<DataColumnSidecar> storeColumns(
       final SignedBeaconBlockHeader header, final int fromIndex, final int toIndexExclusive) {
-    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
-    Stream.iterate(UInt64.valueOf(fromIndex), UInt64::increment)
-        .limit(toIndexExclusive - fromIndex)
-        .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
-        .forEach(database::addSidecar);
+    final SszList<SszKZGCommitment> kzgCommitments = dataStructureUtil.randomBlobKzgCommitments(14);
+    final List<DataColumnSidecar> sidecars =
+        Stream.iterate(UInt64.valueOf(fromIndex), UInt64::increment)
+            .limit(toIndexExclusive - fromIndex)
+            .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
+            .toList();
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      sidecars.forEach(updater::addSidecar);
+      updater.commit();
+    }
+    return sidecars;
   }
 
   private List<UInt64> getStoredColumnIndices(final UInt64 slot, final Bytes32 blockRoot) {

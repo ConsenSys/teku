@@ -30,8 +30,10 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -1450,20 +1452,18 @@ public class KvStoreDatabase implements Database {
 
       int archivedSlots = 0;
 
-      final Map<UInt64, List<DataColumnSlotAndIdentifier>> archiveMap = new HashMap<>();
+      final NavigableMap<UInt64, List<DataColumnSlotAndIdentifier>> archiveMap =
+          dataColumnSidecars.collect(
+              Collectors.groupingBy(
+                  DataColumnSlotAndIdentifier::slot, TreeMap::new, Collectors.toList()));
 
-      dataColumnSidecars.forEach(
-          item -> archiveMap.computeIfAbsent(item.slot(), k -> new ArrayList<>()).add(item));
-
-      final List<UInt64> slots = archiveMap.keySet().stream().sorted().toList();
-
-      if (!slots.isEmpty()) {
+      if (!archiveMap.isEmpty()) {
         LOG.debug(
             "Archiving data column sidecars to proofs from slots {} to {}",
-            slots.getFirst(),
-            slots.getLast());
+            archiveMap.firstKey(),
+            archiveMap.lastKey());
         try (final FinalizedUpdater updater = finalizedUpdater()) {
-          for (final UInt64 slot : slots) {
+          for (final UInt64 slot : archiveMap.keySet()) {
             // The canonical sidecar table may also hold columns of a never-imported block at this
             // slot, so columns are grouped by block root and only a block with every column is
             // archived: first-half columns are required for reconstruction and columns of
@@ -1490,35 +1490,33 @@ public class KvStoreDatabase implements Database {
                     .sorted()
                     .toList();
 
-            final List<DataColumnSidecar> sidecars = new ArrayList<>();
-
-            for (final DataColumnSlotAndIdentifier key : extensionKeys) {
-              final Optional<Bytes> sidecar = dao.getSidecar(key);
-              if (sidecar.isEmpty()) {
-                break;
-              }
-              sidecars.add(spec.deserializeSidecar(sidecar.get(), key.slot()));
+            final List<Optional<List<KZGProof>>> maybeProofs =
+                extensionKeys.stream()
+                    .map(
+                        key ->
+                            dao.getSidecar(key)
+                                .map(
+                                    sidecar ->
+                                        spec
+                                            .deserializeSidecar(sidecar, slot)
+                                            .getKzgProofs()
+                                            .stream()
+                                            .map(SszKZGProof::getKZGProof)
+                                            .toList()))
+                    .toList();
+            if (!maybeProofs.stream().allMatch(Optional::isPresent)) {
+              LOG.trace("Skipping archival for slot {}: extension columns could not be read", slot);
+              continue;
             }
 
-            if (sidecars.size() == halfColumns) {
-              final List<List<KZGProof>> proofs =
-                  sidecars.stream()
-                      .map(
-                          sidecar ->
-                              sidecar.getKzgProofs().stream()
-                                  .map(SszKZGProof::getKZGProof)
-                                  .toList())
-                      .toList();
-              updater.addDataColumnSidecarsProofs(slot, proofs);
-              for (final DataColumnSlotAndIdentifier key : extensionKeys) {
-                updater.removeSidecar(key);
-              }
-              ++archivedSlots;
-              LOG.trace(
-                  "Pruned {} extension data column sidecars, keeping their proofs, at slot {}",
-                  extensionKeys.size(),
-                  slot);
-            }
+            updater.addDataColumnSidecarsProofs(
+                slot, maybeProofs.stream().map(Optional::orElseThrow).toList());
+            extensionKeys.forEach(updater::removeSidecar);
+            ++archivedSlots;
+            LOG.trace(
+                "Pruned {} extension data column sidecars, keeping their proofs, at slot {}",
+                extensionKeys.size(),
+                slot);
           }
           updater.commit();
         }
