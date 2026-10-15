@@ -24,7 +24,11 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
-import tech.pegasys.teku.spec.schemas.*;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 public interface ForkDigestPayloadContext<TPayload extends SszData> {
 
@@ -85,53 +89,64 @@ public interface ForkDigestPayloadContext<TPayload extends SszData> {
         }
       };
 
-  ForkDigestPayloadContext<LightClientBootstrap> LIGHT_CLIENT_BOOTSTRAP = new ForkDigestPayloadContext<>() {
-      @Override
-      public UInt64 getSlotFromPayload(final LightClientBootstrap bootstrap) {
+  ForkDigestPayloadContext<LightClientBootstrap> LIGHT_CLIENT_BOOTSTRAP =
+      new ForkDigestPayloadContext<>() {
+        @Override
+        public UInt64 getSlotFromPayload(final LightClientBootstrap bootstrap) {
           return bootstrap.getLightClientHeader().getBeacon().getSlot();
-      }
+        }
 
-      @Override
-      public SszSchema<LightClientBootstrap> getSchemaFromSchemaDefinitions(final SchemaDefinitions schemaDefinitions) {
-          return SchemaDefinitionsAltair.required(schemaDefinitions).getLightClientBootstrapSchema();
-      }
-  };
+        @Override
+        public SszSchema<LightClientBootstrap> getSchemaFromSchemaDefinitions(
+            final SchemaDefinitions schemaDefinitions) {
+          return SchemaDefinitionsAltair.required(schemaDefinitions)
+              .getLightClientBootstrapSchema();
+        }
+      };
 
-    ForkDigestPayloadContext<LightClientUpdate> LIGHT_CLIENT_UPDATE = new ForkDigestPayloadContext<>() {
+  ForkDigestPayloadContext<LightClientUpdate> LIGHT_CLIENT_UPDATE =
+      new ForkDigestPayloadContext<>() {
         @Override
         public UInt64 getSlotFromPayload(final LightClientUpdate update) {
-            return update.getAttestedHeader().getBeacon().getSlot();
+          return update.getAttestedHeader().getBeacon().getSlot();
         }
 
         @Override
-        public SszSchema<LightClientUpdate> getSchemaFromSchemaDefinitions(final SchemaDefinitions schemaDefinitions) {
-            return SchemaDefinitionsAltair.required(schemaDefinitions).getLightClientUpdateSchema();
+        public SszSchema<LightClientUpdate> getSchemaFromSchemaDefinitions(
+            final SchemaDefinitions schemaDefinitions) {
+          return SchemaDefinitionsAltair.required(schemaDefinitions).getLightClientUpdateSchema();
         }
-    };
+      };
 
-    ForkDigestPayloadContext<LightClientFinalityUpdate> LIGHT_CLIENT_FINALITY_UPDATE = new ForkDigestPayloadContext<>() {
+  ForkDigestPayloadContext<LightClientFinalityUpdate> LIGHT_CLIENT_FINALITY_UPDATE =
+      new ForkDigestPayloadContext<>() {
         @Override
         public UInt64 getSlotFromPayload(final LightClientFinalityUpdate finalityUpdate) {
-            return finalityUpdate.getAttestedHeader().getBeacon().getSlot();
+          return finalityUpdate.getAttestedHeader().getBeacon().getSlot();
         }
 
         @Override
-        public SszSchema<LightClientFinalityUpdate> getSchemaFromSchemaDefinitions(final SchemaDefinitions schemaDefinitions) {
-            return SchemaDefinitionsAltair.required(schemaDefinitions).getLightClientFinalityUpdateSchema();
+        public SszSchema<LightClientFinalityUpdate> getSchemaFromSchemaDefinitions(
+            final SchemaDefinitions schemaDefinitions) {
+          return SchemaDefinitionsAltair.required(schemaDefinitions)
+              .getLightClientFinalityUpdateSchema();
         }
-    };
+      };
 
-    ForkDigestPayloadContext<LightClientOptimisticUpdate> LIGHT_CLIENT_OPTIMISTIC_UPDATE = new ForkDigestPayloadContext<>() {
+  ForkDigestPayloadContext<LightClientOptimisticUpdate> LIGHT_CLIENT_OPTIMISTIC_UPDATE =
+      new ForkDigestPayloadContext<>() {
         @Override
         public UInt64 getSlotFromPayload(final LightClientOptimisticUpdate optimisticUpdate) {
-            return optimisticUpdate.getAttestedHeader().getBeacon().getSlot();
+          return optimisticUpdate.getAttestedHeader().getBeacon().getSlot();
         }
 
         @Override
-        public SszSchema<LightClientOptimisticUpdate> getSchemaFromSchemaDefinitions(final SchemaDefinitions schemaDefinitions) {
-            return SchemaDefinitionsAltair.required(schemaDefinitions).getLightClientOptimisticUpdateSchema();
+        public SszSchema<LightClientOptimisticUpdate> getSchemaFromSchemaDefinitions(
+            final SchemaDefinitions schemaDefinitions) {
+          return SchemaDefinitionsAltair.required(schemaDefinitions)
+              .getLightClientOptimisticUpdateSchema();
         }
-    };
+      };
 
   UInt64 getSlotFromPayload(final TPayload responsePayload);
 
