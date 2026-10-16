@@ -29,6 +29,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
+import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.SameMessageBatchVerifier;
@@ -46,18 +47,21 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
 
   private static final Duration IDLE_POLL_TIMEOUT = Duration.ofSeconds(30);
   private static final Duration GATHER_LOCK_TIMEOUT = Duration.ofSeconds(1);
+  private static final int BATCH_GATHER_TARGET_SIZE = 64;
 
   private final AsyncRunner completionRunner;
   private final int numThreads;
   private final int maxBatchSize;
   private final int minBatchSizeToSplit;
   private final boolean strictThreadLimitEnabled;
+  private final SignatureVerificationMode mode;
   private final long batchGatherTimeoutNanos;
   private final int batchGatherTargetSize;
 
   @VisibleForTesting final BlockingQueue<SignatureTask> batchSignatureTasks;
-  // Only one worker gathers a batch at a time, otherwise tasks arriving during the gather window
-  // would be spread one-by-one across all idle workers instead of forming a single batch
+  // GATHER_AND_GROUP only: one worker gathers a batch at a time, otherwise tasks arriving during
+  // the gather window would be spread one-by-one across all idle workers instead of forming a
+  // single batch
   private final ReentrantLock gatherLock = new ReentrantLock();
   private final AsyncRunner asyncRunner;
   private final Counter batchCounter;
@@ -75,8 +79,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final int maxBatchSize,
       final int minBatchSizeToSplit,
       final boolean strictThreadLimitEnabled,
-      final Duration batchGatherTimeout,
-      final int batchGatherTargetSize) {
+      final SignatureVerificationMode mode,
+      final Duration batchGatherTimeout) {
     this.numThreads = Math.min(numThreads, Runtime.getRuntime().availableProcessors());
     this.asyncRunner = asyncRunnerFactory.create(this.getClass().getSimpleName(), this.numThreads);
     this.completionRunner = completionRunner;
@@ -85,8 +89,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     this.batchSignatureTasks = new ArrayBlockingQueue<>(queueCapacity);
     this.minBatchSizeToSplit = minBatchSizeToSplit;
     this.strictThreadLimitEnabled = strictThreadLimitEnabled;
+    this.mode = mode;
     this.batchGatherTimeoutNanos = batchGatherTimeout.toNanos();
-    this.batchGatherTargetSize = batchGatherTargetSize;
+    this.batchGatherTargetSize = Math.min(BATCH_GATHER_TARGET_SIZE, maxBatchSize);
     metricsSystem.createGauge(
         TekuMetricCategory.EXECUTOR,
         "signature_verifications_queue_size",
@@ -129,8 +134,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final int queueCapacity,
       final int maxBatchSize,
       final boolean strictThreadLimitEnabled,
-      final Duration batchGatherTimeout,
-      final int batchGatherTargetSize) {
+      final SignatureVerificationMode mode,
+      final Duration batchGatherTimeout) {
     this(
         metricsSystem,
         asyncRunnerFactory,
@@ -140,8 +145,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
         maxBatchSize,
         DEFAULT_MIN_BATCH_SIZE_TO_SPLIT,
         strictThreadLimitEnabled,
-        batchGatherTimeout,
-        batchGatherTargetSize);
+        mode,
+        batchGatherTimeout);
   }
 
   @Override
@@ -220,14 +225,54 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     }
   }
 
-  /** Verifies one task's signatures with the configured thread policy. */
+  /** Verifies one task's signatures with the configured mode and thread policy. */
   private boolean verifyTaskSignatures(final SignatureTask task) {
-    return SameMessageBatchVerifier.batchVerify(
-        task.publicKeys, task.messages, task.signatures, !strictThreadLimitEnabled);
+    return batchVerify(task.publicKeys, task.messages, task.signatures);
+  }
+
+  /** Batch-verifies signatures with the configured mode and thread policy. */
+  private boolean batchVerify(
+      final List<List<BLSPublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<BLSSignature> signatures) {
+    return switch (mode) {
+      case LEGACY ->
+          strictThreadLimitEnabled
+              ? BLS.batchVerify(publicKeys, messages, signatures, publicKeys.size() > 1, false)
+              : BLS.batchVerify(publicKeys, messages, signatures);
+      case GATHER_AND_GROUP ->
+          SameMessageBatchVerifier.batchVerify(
+              publicKeys, messages, signatures, !strictThreadLimitEnabled);
+    };
   }
 
   @VisibleForTesting
   List<SignatureTask> waitForBatch() {
+    return mode == SignatureVerificationMode.LEGACY ? legacyWaitForBatch() : gatherBatch();
+  }
+
+  /** Takes the first queued task, waiting for one if needed, plus whatever else is queued. */
+  private List<SignatureTask> legacyWaitForBatch() {
+    final List<SignatureTask> tasks = new ArrayList<>();
+    try {
+      int batchSize = maxBatchSize;
+      final SignatureTask firstTask = batchSignatureTasks.poll(30, TimeUnit.SECONDS);
+      if (firstTask != null) {
+        tasks.add(firstTask);
+        batchSize -= 1;
+      }
+      batchSignatureTasks.drainTo(tasks, batchSize);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    return tasks;
+  }
+
+  /**
+   * Takes the first queued task, then keeps gathering until the batch reaches the gather target or
+   * the gather timeout expires. Only one worker gathers at a time.
+   */
+  private List<SignatureTask> gatherBatch() {
     final List<SignatureTask> tasks = new ArrayList<>();
     try {
       if (!gatherLock.tryLock(GATHER_LOCK_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS)) {
@@ -285,9 +330,7 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       allSignatures.addAll(task.signatures);
     }
 
-    final boolean batchIsValid =
-        SameMessageBatchVerifier.batchVerify(
-            allKeys, allMessages, allSignatures, !strictThreadLimitEnabled);
+    final boolean batchIsValid = batchVerify(allKeys, allMessages, allSignatures);
     if (batchIsValid) {
       for (SignatureTask task : tasks) {
         task.completeAsync(true);

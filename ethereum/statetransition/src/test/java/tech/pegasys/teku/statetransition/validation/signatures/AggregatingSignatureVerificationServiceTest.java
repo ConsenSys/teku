@@ -32,6 +32,8 @@ import java.util.concurrent.TimeUnit;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
@@ -58,7 +60,6 @@ public class AggregatingSignatureVerificationServiceTest {
   private final int numThreads = 2;
   private final boolean strictThreadLimitEnabled = true;
   private final Duration batchGatherTimeout = Duration.ofMillis(10);
-  private final int batchGatherTargetSize = 64;
   private final StubAsyncRunner completionRunner = new StubAsyncRunner();
 
   private final StubAsyncRunnerFactory asyncRunnerFactory = new StubAsyncRunnerFactory();
@@ -72,8 +73,8 @@ public class AggregatingSignatureVerificationServiceTest {
           batchSize,
           minBatchSizeToSplit,
           strictThreadLimitEnabled,
-          batchGatherTimeout,
-          batchGatherTargetSize);
+          SignatureVerificationMode.GATHER_AND_GROUP,
+          batchGatherTimeout);
 
   @Test
   public void start_shouldQueueTasks() {
@@ -263,8 +264,8 @@ public class AggregatingSignatureVerificationServiceTest {
             batchSize,
             minBatchSizeToSplit,
             strictThreadLimitEnabled,
-            batchGatherTimeout,
-            batchGatherTargetSize);
+            SignatureVerificationMode.GATHER_AND_GROUP,
+            batchGatherTimeout);
     startService();
 
     final Random random = new Random(1);
@@ -334,8 +335,8 @@ public class AggregatingSignatureVerificationServiceTest {
             batchSize,
             minBatchSizeToSplit,
             strictThreadLimitEnabled,
-            batchGatherTimeout,
-            batchGatherTargetSize);
+            SignatureVerificationMode.GATHER_AND_GROUP,
+            batchGatherTimeout);
     startService();
 
     // Mismatched public key / message / signature list sizes make the underlying BLS batch
@@ -377,11 +378,14 @@ public class AggregatingSignatureVerificationServiceTest {
     assertThat(malformedOnlySignature).isCompletedExceptionally();
   }
 
-  @Test
-  public void strictThreadLimit_fallbackVerifiesMultiSignatureTasksOnTheCallingThread() {
+  @ParameterizedTest
+  @EnumSource(SignatureVerificationMode.class)
+  public void strictThreadLimit_fallbackVerifiesMultiSignatureTasksOnTheCallingThread(
+      final SignatureVerificationMode mode) {
     final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
     BLS.setBlsImplementation(recording);
     try {
+      service = createService(mode, batchGatherTimeout);
       startService();
       final SafeFuture<Boolean> multi = executeAllValidListVerify(8);
       // Two tasks whose signatures all share one message, so they go through same-message prepare
@@ -399,18 +403,20 @@ public class AggregatingSignatureVerificationServiceTest {
       assertThat(invalid).isCompletedWithValue(false);
       assertThat(recording.getPrepareThreadNames()).isNotEmpty();
       assertThat(recording.getPrepareThreadNames()).containsOnly(Thread.currentThread().getName());
-      assertThat(recording.getSameMessageParallelArguments()).isNotEmpty();
-      assertThat(recording.getSameMessageParallelArguments()).containsOnly(false);
+      assertSameMessageParallelArguments(recording, mode);
     } finally {
       BLS.resetBlsImplementation();
     }
   }
 
-  @Test
-  public void strictThreadLimit_exceptionFallbackVerifiesMultiSignatureTasksOnTheCallingThread() {
+  @ParameterizedTest
+  @EnumSource(SignatureVerificationMode.class)
+  public void strictThreadLimit_exceptionFallbackVerifiesMultiSignatureTasksOnTheCallingThread(
+      final SignatureVerificationMode mode) {
     final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
     BLS.setBlsImplementation(recording);
     try {
+      service = createService(mode, batchGatherTimeout);
       startService();
       final SafeFuture<Boolean> multi = executeAllValidListVerify(8);
       // Two tasks whose signatures all share one message, so they go through same-message prepare
@@ -431,8 +437,7 @@ public class AggregatingSignatureVerificationServiceTest {
       assertThat(malformed).isCompletedExceptionally();
       assertThat(recording.getPrepareThreadNames()).isNotEmpty();
       assertThat(recording.getPrepareThreadNames()).containsOnly(Thread.currentThread().getName());
-      assertThat(recording.getSameMessageParallelArguments()).isNotEmpty();
-      assertThat(recording.getSameMessageParallelArguments()).containsOnly(false);
+      assertSameMessageParallelArguments(recording, mode);
     } finally {
       BLS.resetBlsImplementation();
     }
@@ -496,7 +501,7 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_gathersTasksArrivingWithinTheGatherWindow() throws Exception {
-    service = createServiceWithGathering(Duration.ofMillis(500), 10);
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(500));
     startService();
     executeValidVerify(0, 0);
 
@@ -512,7 +517,7 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_stopsGatheringOnceTargetSizeIsReached() throws Exception {
-    service = createServiceWithGathering(Duration.ofSeconds(10), 3);
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofSeconds(10), 3);
     startService();
     executeValidVerify(0, 0);
 
@@ -531,7 +536,7 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_returnsAfterGatherTimeoutWhenTargetSizeNotReached() throws Exception {
-    service = createServiceWithGathering(Duration.ofMillis(200), 10);
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(200));
     startService();
     executeValidVerify(0, 0);
 
@@ -544,7 +549,7 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_onlyOneWorkerGathersAtATime() throws Exception {
-    service = createServiceWithGathering(Duration.ofMillis(500), 10);
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(500));
     startService();
     executeValidVerify(0, 0);
 
@@ -569,6 +574,123 @@ public class AggregatingSignatureVerificationServiceTest {
     }
   }
 
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void legacyMode_waitForBatchReturnsWithoutGathering() {
+    service = createService(SignatureVerificationMode.LEGACY, Duration.ofSeconds(10));
+    startService();
+    executeValidVerify(0, 0);
+
+    final long start = System.nanoTime();
+    final List<SignatureTask> batch = service.waitForBatch();
+
+    assertThat(batch).hasSize(1);
+    // Legacy mode drains whatever is queued and never waits for the 10s gather window
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
+  }
+
+  @Test
+  public void legacyMode_verifiesWithBlsBatchVerify() {
+    final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
+    BLS.setBlsImplementation(recording);
+    try {
+      service = createService(SignatureVerificationMode.LEGACY, batchGatherTimeout);
+      final List<SafeFuture<Boolean>> futures = executeThreeValidSameMessageVerifies();
+
+      service.batchVerifySignatures(getPendingTasks());
+      completionRunner.executeQueuedActions();
+
+      assertThat(recording.getSameMessagePrepareCount()).isZero();
+      futures.forEach(future -> assertThat(future).isCompletedWithValue(true));
+    } finally {
+      BLS.resetBlsImplementation();
+    }
+  }
+
+  @Test
+  public void gatherAndGroupMode_verifiesWithSameMessageBatchVerifier() {
+    final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
+    BLS.setBlsImplementation(recording);
+    try {
+      service = createService(SignatureVerificationMode.GATHER_AND_GROUP, batchGatherTimeout);
+      final List<SafeFuture<Boolean>> futures = executeThreeValidSameMessageVerifies();
+
+      service.batchVerifySignatures(getPendingTasks());
+      completionRunner.executeQueuedActions();
+
+      assertThat(recording.getSameMessagePrepareCount()).isEqualTo(1);
+      futures.forEach(future -> assertThat(future).isCompletedWithValue(true));
+    } finally {
+      BLS.resetBlsImplementation();
+    }
+  }
+
+  @Test
+  public void strictThreadLimit_passesParallelFalseToSameMessagePreparation() {
+    assertThat(strictThreadLimitEnabled).isTrue();
+    final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
+    BLS.setBlsImplementation(recording);
+    try {
+      service = createService(SignatureVerificationMode.GATHER_AND_GROUP, batchGatherTimeout);
+      final List<SafeFuture<Boolean>> futures = executeThreeValidSameMessageVerifies();
+
+      service.batchVerifySignatures(getPendingTasks());
+      completionRunner.executeQueuedActions();
+
+      futures.forEach(future -> assertThat(future).isCompletedWithValue(true));
+      assertThat(recording.getSameMessageParallelArguments()).isNotEmpty();
+      assertThat(recording.getSameMessageParallelArguments()).containsOnly(false);
+    } finally {
+      BLS.resetBlsImplementation();
+    }
+  }
+
+  @Test
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void gatherTargetIsClampedToMaxBatchSize() {
+    final int maxBatchSize = 10;
+    service =
+        createService(
+            SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofSeconds(10), maxBatchSize);
+    startService();
+    for (int i = 0; i < maxBatchSize; i++) {
+      executeValidVerify(i, i);
+    }
+
+    final long start = System.nanoTime();
+    final List<SignatureTask> batch = service.waitForBatch();
+
+    assertThat(batch).hasSize(maxBatchSize);
+    // The internal gather target (64) is clamped to maxBatchSize, so a full batch returns at once
+    // instead of waiting out the 10s gather timeout
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
+  }
+
+  private static void assertSameMessageParallelArguments(
+      final RecordingBLS12381 recording, final SignatureVerificationMode mode) {
+    if (mode == SignatureVerificationMode.LEGACY) {
+      // Legacy mode never groups by message
+      assertThat(recording.getSameMessagePrepareCount()).isZero();
+    } else {
+      assertThat(recording.getSameMessageParallelArguments()).isNotEmpty();
+      assertThat(recording.getSameMessageParallelArguments()).containsOnly(false);
+    }
+  }
+
+  /** Starts the service and queues three single-signature tasks that all sign one message. */
+  private List<SafeFuture<Boolean>> executeThreeValidSameMessageVerifies() {
+    startService();
+    final Bytes message = Bytes.of(42);
+    final List<SafeFuture<Boolean>> futures = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      final BLSKeyPair keypair = KEYS.get(i);
+      futures.add(
+          service.verify(
+              keypair.getPublicKey(), message, BLS.sign(keypair.getSecretKey(), message)));
+    }
+    return futures;
+  }
+
   /**
    * The gathering worker takes the first task out of the queue before it starts waiting for more,
    * so an empty queue means a gather is in progress and later submissions land inside it.
@@ -577,8 +699,13 @@ public class AggregatingSignatureVerificationServiceTest {
     Waiter.waitFor(() -> assertThat(service.batchSignatureTasks).isEmpty());
   }
 
-  private AggregatingSignatureVerificationService createServiceWithGathering(
-      final Duration gatherTimeout, final int gatherTargetSize) {
+  private AggregatingSignatureVerificationService createService(
+      final SignatureVerificationMode mode, final Duration gatherTimeout) {
+    return createService(mode, gatherTimeout, batchSize);
+  }
+
+  private AggregatingSignatureVerificationService createService(
+      final SignatureVerificationMode mode, final Duration gatherTimeout, final int maxBatchSize) {
     // Stub runner factory: worker threads are never actually started so only the explicit
     // waitForBatch calls in the test consume the queue
     return new AggregatingSignatureVerificationService(
@@ -587,11 +714,11 @@ public class AggregatingSignatureVerificationServiceTest {
         completionRunner,
         numThreads,
         queueCapacity,
-        batchSize,
+        maxBatchSize,
         minBatchSizeToSplit,
         strictThreadLimitEnabled,
-        gatherTimeout,
-        gatherTargetSize);
+        mode,
+        gatherTimeout);
   }
 
   private void startService() {

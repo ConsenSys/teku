@@ -62,6 +62,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
+import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationMode;
 
 public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
 
@@ -947,20 +948,27 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
   public void shouldUseDefaultBatchVerifyGatherOptions() {
     final P2PConfig config = getTekuConfigurationFromArguments().p2p();
     assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(10));
-    assertThat(config.getBatchVerifyGatherTargetSize()).isEqualTo(64);
   }
 
   @Test
   public void shouldSetBatchVerifyGatherOptions() {
     final P2PConfig config =
-        getTekuConfigurationFromArguments(
-                "--Xp2p-batch-verify-signatures-gather-timeout-ms",
-                "5",
-                "--Xp2p-batch-verify-signatures-gather-target-size",
-                "32")
+        getTekuConfigurationFromArguments("--Xp2p-batch-verify-signatures-gather-timeout-ms", "5")
             .p2p();
     assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(5));
-    assertThat(config.getBatchVerifyGatherTargetSize()).isEqualTo(32);
+  }
+
+  @Test
+  public void shouldDefaultBatchVerifyModeToGatherAndGroup() {
+    final P2PConfig config = getTekuConfigurationFromArguments().p2p();
+    assertThat(config.getBatchVerifyMode()).isEqualTo(SignatureVerificationMode.GATHER_AND_GROUP);
+  }
+
+  @Test
+  public void shouldSetBatchVerifyModeToLegacy() {
+    final P2PConfig config =
+        getTekuConfigurationFromArguments("--Xp2p-batch-verify-signatures-mode", "LEGACY").p2p();
+    assertThat(config.getBatchVerifyMode()).isEqualTo(SignatureVerificationMode.LEGACY);
   }
 
   @Test
@@ -971,15 +979,5 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
                     "--Xp2p-batch-verify-signatures-gather-timeout-ms", "-1"))
         .isInstanceOf(AssertionError.class)
         .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis");
-  }
-
-  @Test
-  public void shouldRejectZeroBatchVerifyGatherTargetSize() {
-    assertThatThrownBy(
-            () ->
-                getTekuConfigurationFromArguments(
-                    "--Xp2p-batch-verify-signatures-gather-target-size", "0"))
-        .isInstanceOf(AssertionError.class)
-        .hasMessageContaining("Invalid batchVerifyGatherTargetSize");
   }
 }

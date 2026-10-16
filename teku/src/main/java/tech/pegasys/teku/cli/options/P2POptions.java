@@ -42,6 +42,7 @@ import tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig;
 import tech.pegasys.teku.networking.p2p.gossip.config.GossipConfig;
 import tech.pegasys.teku.networking.p2p.libp2p.MultiaddrPeerAddress;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
+import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationMode;
 
 public class P2POptions {
   @Mixin private final NatOptions natOptions = new NatOptions();
@@ -576,6 +577,17 @@ public class P2POptions {
       P2PConfig.DEFAULT_BATCH_VERIFY_STRICT_THREAD_LIMIT_ENABLED;
 
   @Option(
+      names = {"--Xp2p-batch-verify-signatures-mode"},
+      paramLabel = "<MODE>",
+      description =
+          "Signature verification batching: LEGACY drains whatever is queued; GATHER_AND_GROUP"
+              + " gathers a batch for up to the gather timeout and verifies signatures over the"
+              + " same message together",
+      arity = "1",
+      hidden = true)
+  private SignatureVerificationMode batchVerifyMode = P2PConfig.DEFAULT_BATCH_VERIFY_MODE;
+
+  @Option(
       names = {"--Xp2p-batch-verify-signatures-gather-timeout-ms"},
       paramLabel = "<NUMBER>",
       description =
@@ -585,15 +597,6 @@ public class P2POptions {
       arity = "1",
       hidden = true)
   private int batchVerifyGatherTimeoutMillis = P2PConfig.DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS;
-
-  @Option(
-      names = {"--Xp2p-batch-verify-signatures-gather-target-size"},
-      paramLabel = "<NUMBER>",
-      description =
-          "Stop gathering a signature verification batch early once it holds this many tasks",
-      arity = "1",
-      hidden = true)
-  private int batchVerifyGatherTargetSize = P2PConfig.DEFAULT_BATCH_VERIFY_GATHER_TARGET_SIZE;
 
   @Option(
       names = {"--p2p-discovery-site-local-addresses-enabled"},
@@ -786,8 +789,8 @@ public class P2POptions {
                   .batchVerifyMaxThreads(batchVerifyMaxThreads)
                   .batchVerifyMaxBatchSize(batchVerifyMaxBatchSize)
                   .batchVerifyStrictThreadLimitEnabled(batchVerifyStrictThreadLimitEnabled)
+                  .batchVerifyMode(batchVerifyMode)
                   .batchVerifyGatherTimeoutMillis(batchVerifyGatherTimeoutMillis)
-                  .batchVerifyGatherTargetSize(batchVerifyGatherTargetSize)
                   .targetSubnetSubscriberCount(p2pTargetSubnetSubscriberCount)
                   .isGossipScoringEnabled(gossipScoringEnabled)
                   .peerBlocksRateLimit(peerBlocksRateLimit)

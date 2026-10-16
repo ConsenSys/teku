@@ -2065,8 +2065,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             p2PConfig.getBatchVerifyQueueCapacity(),
             p2PConfig.getBatchVerifyMaxBatchSize(),
             p2PConfig.isBatchVerifyStrictThreadLimitEnabled(),
-            p2PConfig.getBatchVerifyGatherTimeout(),
-            p2PConfig.getBatchVerifyGatherTargetSize());
+            p2PConfig.getBatchVerifyMode(),
+            p2PConfig.getBatchVerifyGatherTimeout());
   }
 
   protected void initAttestationManager() {

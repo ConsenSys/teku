@@ -69,8 +69,8 @@ public class AggregatingSignatureVerificationServiceBenchmark {
           15_000,
           250,
           false,
-          Duration.ofMillis(10),
-          64);
+          SignatureVerificationMode.GATHER_AND_GROUP,
+          Duration.ofMillis(10));
 
   private final int signaturesToVerify = 10_000;
 
