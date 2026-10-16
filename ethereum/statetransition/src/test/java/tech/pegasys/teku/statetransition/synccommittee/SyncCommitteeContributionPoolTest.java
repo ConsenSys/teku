@@ -15,7 +15,6 @@ package tech.pegasys.teku.statetransition.synccommittee;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -65,7 +64,7 @@ class SyncCommitteeContributionPoolTest {
 
   @BeforeEach
   void setUp() {
-    when(validator.validate(any(), anyBoolean())).thenReturn(SafeFuture.completedFuture(ACCEPT));
+    when(validator.validate(any())).thenReturn(SafeFuture.completedFuture(ACCEPT));
   }
 
   @Test
@@ -89,27 +88,11 @@ class SyncCommitteeContributionPoolTest {
   }
 
   @Test
-  void shouldValidateLocalContributionsAsProducedLocally() {
-    final SignedContributionAndProof proof = dataStructureUtil.randomSignedContributionAndProof(10);
-    addValidLocal(proof);
-
-    verify(validator).validate(proof, true);
-  }
-
-  @Test
-  void shouldValidateRemoteContributionsAsNotProducedLocally() {
-    final SignedContributionAndProof proof = dataStructureUtil.randomSignedContributionAndProof(10);
-    addValidRemote(proof);
-
-    verify(validator).validate(proof, false);
-  }
-
-  @Test
   void shouldNotNotifySubscribersWhenProofIsInvalid() {
     pool.subscribeOperationAdded(subscriber);
 
     final SignedContributionAndProof proof = dataStructureUtil.randomSignedContributionAndProof(10);
-    when(validator.validate(proof, true)).thenReturn(SafeFuture.completedFuture(reject("Bad")));
+    when(validator.validate(proof)).thenReturn(SafeFuture.completedFuture(reject("Bad")));
     assertThat(pool.addLocal(proof)).isCompletedWithValue(reject("Bad"));
 
     verifyNoInteractions(subscriber);

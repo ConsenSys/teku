@@ -77,15 +77,6 @@ public class SignedContributionAndProofValidator {
   }
 
   public SafeFuture<InternalValidationResult> validate(final SignedContributionAndProof proof) {
-    return validate(proof, false);
-  }
-
-  /**
-   * @param producedLocally whether the contribution comes from one of this node's own validators,
-   *     in which case its signatures are verified without waiting for a batch
-   */
-  public SafeFuture<InternalValidationResult> validate(
-      final SignedContributionAndProof proof, final boolean producedLocally) {
     final ContributionAndProof contributionAndProof = proof.getMessage();
     final SyncCommitteeContribution contribution = contributionAndProof.getContribution();
 
@@ -156,8 +147,7 @@ public class SignedContributionAndProofValidator {
                   syncCommitteeUtil,
                   sourceUniquenessKey,
                   targetUniquenessKey,
-                  maybeState.get(),
-                  producedLocally ? signatureVerifier.urgent() : signatureVerifier);
+                  maybeState.get());
             });
   }
 
@@ -174,8 +164,7 @@ public class SignedContributionAndProofValidator {
       final SyncCommitteeUtil syncCommitteeUtil,
       final SourceUniquenessKey sourceUniquenessKey,
       final TargetUniquenessKey targetUniquenessKey,
-      final BeaconStateAltair state,
-      final AsyncBLSSignatureVerifier asyncSignatureVerifier) {
+      final BeaconStateAltair state) {
     final BeaconStateAccessors beaconStateAccessors =
         spec.atSlot(contribution.getSlot()).beaconStateAccessors();
 
@@ -213,7 +202,7 @@ public class SignedContributionAndProofValidator {
     }
 
     final AsyncBatchBLSSignatureVerifier signatureVerifier =
-        new AsyncBatchBLSSignatureVerifier(asyncSignatureVerifier);
+        new AsyncBatchBLSSignatureVerifier(this.signatureVerifier);
 
     final ForkInfo contributionSignatureForkInfo =
         new ForkInfo(

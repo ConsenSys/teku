@@ -100,11 +100,8 @@ public class AttestationValidator {
     if (validatableAttestation.isAcceptedAsGossip()) {
       return SafeFuture.completedFuture(InternalValidationResult.ACCEPT);
     }
-    // Attestations from this node's own validators must not wait for a verification batch
     return singleOrAggregateAttestationChecks(
-            validatableAttestation.isProducedLocally()
-                ? signatureVerifier.urgent()
-                : signatureVerifier,
+            signatureVerifier,
             validatableAttestation,
             validatableAttestation.getReceivedSubnetId(),
             true,

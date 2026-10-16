@@ -200,12 +200,7 @@ public class SyncCommitteeMessageValidator {
     /*
      * [REJECT] The signature is valid
      */
-    // Messages from this node's own validators carry no subnet id and must not wait for a batch
-    final AsyncBLSSignatureVerifier verifier =
-        validatableMessage.getReceivedSubnetId().isEmpty()
-            ? signatureVerifier.urgent()
-            : signatureVerifier;
-    return verifier
+    return signatureVerifier
         .verify(maybeValidatorPublicKey.get(), signingRoot, message.getSignature())
         .thenApply(
             signatureValid -> {

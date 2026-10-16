@@ -69,7 +69,7 @@ public class SyncCommitteeContributionPool implements SlotEventsChannel {
   private SafeFuture<InternalValidationResult> add(
       final SignedContributionAndProof signedContributionAndProof, final boolean fromNetwork) {
     return validator
-        .validate(signedContributionAndProof, !fromNetwork)
+        .validate(signedContributionAndProof)
         .thenPeek(
             result -> {
               if (result.isAccept()) {

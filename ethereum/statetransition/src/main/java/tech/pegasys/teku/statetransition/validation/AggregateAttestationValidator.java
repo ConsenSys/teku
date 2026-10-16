@@ -132,12 +132,8 @@ public class AggregateAttestationValidator {
       final UInt64 aggregateSlot,
       final SpecVersion specVersion,
       final AggregatorIndexAndEpoch aggregatorIndexAndEpoch) {
-    // Aggregates from this node's own validators must not wait for a verification batch
     final AsyncBatchBLSSignatureVerifier signatureVerifier =
-        new AsyncBatchBLSSignatureVerifier(
-            attestation.isProducedLocally()
-                ? this.signatureVerifier.urgent()
-                : this.signatureVerifier);
+        new AsyncBatchBLSSignatureVerifier(this.signatureVerifier);
     return singleOrAggregateAttestationChecks(signatureVerifier, attestation, OptionalInt.empty())
         .thenCompose(
             resultWithState -> {

@@ -35,7 +35,6 @@ import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
-import tech.pegasys.teku.statetransition.validation.signatures.RecordingSignatureVerifier;
 import tech.pegasys.teku.statetransition.validation.signatures.SimpleSignatureVerificationService;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
@@ -376,39 +375,5 @@ class SignedContributionAndProofValidatorTest {
             .resetParticipantsToOnlyAggregator()
             .build();
     assertThat(validator.validate(message)).isCompletedWithValue(ACCEPT);
-  }
-
-  @Test
-  void shouldUseUrgentVerifierOnlyForLocallyProducedContributions() {
-    setupWithDefaultSpec();
-    final SignedContributionAndProof message =
-        chainBuilder.createValidSignedContributionAndProofBuilder().build();
-
-    final RecordingSignatureVerifier localVerifier = new RecordingSignatureVerifier();
-    final SignedContributionAndProofValidator localValidator =
-        new SignedContributionAndProofValidator(
-            spec,
-            storageSystem.recentChainData(),
-            syncCommitteeStateUtils,
-            localVerifier,
-            new GossipValidationHelper(
-                spec, storageSystem.recentChainData(), storageSystem.getMetricsSystem()));
-    assertThat(localValidator.validate(message, true)).isCompletedWithValue(ACCEPT);
-    assertThat(localVerifier.urgent().getVerifyCount()).isEqualTo(1);
-    assertThat(localVerifier.getVerifyCount()).isZero();
-
-    // Fresh validator so the seen-contribution caches do not short-circuit the second validation
-    final RecordingSignatureVerifier networkVerifier = new RecordingSignatureVerifier();
-    final SignedContributionAndProofValidator networkValidator =
-        new SignedContributionAndProofValidator(
-            spec,
-            storageSystem.recentChainData(),
-            syncCommitteeStateUtils,
-            networkVerifier,
-            new GossipValidationHelper(
-                spec, storageSystem.recentChainData(), storageSystem.getMetricsSystem()));
-    assertThat(networkValidator.validate(message, false)).isCompletedWithValue(ACCEPT);
-    assertThat(networkVerifier.getVerifyCount()).isEqualTo(1);
-    assertThat(networkVerifier.urgent().getVerifyCount()).isZero();
   }
 }

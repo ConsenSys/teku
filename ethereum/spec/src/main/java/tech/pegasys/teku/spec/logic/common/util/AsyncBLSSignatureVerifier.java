@@ -63,14 +63,4 @@ public interface AsyncBLSSignatureVerifier {
       final List<List<BLSPublicKey>> publicKeys,
       final List<Bytes> messages,
       final List<BLSSignature> signatures);
-
-  /**
-   * A view of this verifier for signatures that must be verified as soon as possible, e.g. messages
-   * produced by this node's own validators that are waiting to be broadcast. Implementations that
-   * batch verifications must not hold such a signature back while gathering a larger batch. The
-   * default is this verifier itself, which is right for any implementation that never delays.
-   */
-  default AsyncBLSSignatureVerifier urgent() {
-    return this;
-  }
 }

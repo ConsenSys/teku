@@ -62,7 +62,6 @@ import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
-import tech.pegasys.teku.statetransition.validation.signatures.RecordingSignatureVerifier;
 import tech.pegasys.teku.storage.client.ChainUpdater;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
@@ -718,34 +717,5 @@ class AggregateAttestationValidatorTest {
       final AttestationSchema<?> attestationSchema, final UInt64 committeeIndex) {
     return () ->
         attestationSchema.getCommitteeBitsSchema().orElseThrow().ofBits(committeeIndex.intValue());
-  }
-
-  @TestTemplate
-  public void shouldUseUrgentVerifierOnlyForLocallyProducedAggregates() {
-    final StateAndBlockSummary chainHead = storageSystem.getChainHead();
-    final SignedAggregateAndProof aggregate = generator.validAggregateAndProof(chainHead);
-    final BeaconState state = getStateFor(aggregate).orElseThrow();
-    when(attestationValidator.singleOrAggregateAttestationChecks(
-            any(), any(), eq(OptionalInt.empty())))
-        .thenReturn(SafeFuture.completedFuture(InternalValidationResultWithState.accept(state)));
-
-    final RecordingSignatureVerifier localVerifier = new RecordingSignatureVerifier();
-    final AggregateAttestationValidator localValidator =
-        new AggregateAttestationValidator(spec, attestationValidator, localVerifier);
-    assertThat(
-            localValidator.validate(ValidatableAttestation.aggregateFromValidator(spec, aggregate)))
-        .isCompletedWithValue(InternalValidationResult.ACCEPT);
-    assertThat(localVerifier.urgent().getVerifyCount()).isEqualTo(1);
-    assertThat(localVerifier.getVerifyCount()).isZero();
-
-    // Fresh validator so the seen-aggregate caches do not short-circuit the second validation
-    final RecordingSignatureVerifier networkVerifier = new RecordingSignatureVerifier();
-    final AggregateAttestationValidator networkValidator =
-        new AggregateAttestationValidator(spec, attestationValidator, networkVerifier);
-    assertThat(
-            networkValidator.validate(ValidatableAttestation.aggregateFromNetwork(spec, aggregate)))
-        .isCompletedWithValue(InternalValidationResult.ACCEPT);
-    assertThat(networkVerifier.getVerifyCount()).isEqualTo(1);
-    assertThat(networkVerifier.urgent().getVerifyCount()).isZero();
   }
 }
