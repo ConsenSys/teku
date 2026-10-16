@@ -37,6 +37,8 @@ import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.RecordingBLS12381;
+import tech.pegasys.teku.bls.impl.blst.BlstLoader;
 import tech.pegasys.teku.infrastructure.async.AsyncRunnerFactory;
 import tech.pegasys.teku.infrastructure.async.MetricTrackingExecutorFactory;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -350,6 +352,78 @@ public class AggregatingSignatureVerificationServiceTest {
     assertThat(valid).isCompletedWithValue(true);
   }
 
+  @Test
+  public void batchVerifySignatures_smallFailedBatchIsolatesAThrowingTask() {
+    startService();
+    // Each of these tasks throws when verified on its own (mismatched list sizes), but their sizes
+    // cancel out so the combined batch is well formed: it fails rather than throws, and the small
+    // batch falls back to verifying each task individually.
+    final SafeFuture<Boolean> malformedMissingSignature =
+        service.verify(
+            List.of(List.of(KEYS.get(0).getPublicKey())), List.of(Bytes.of(0)), List.of());
+    final SafeFuture<Boolean> malformedOnlySignature =
+        service.verify(
+            List.of(), List.of(), List.of(BLS.sign(KEYS.get(3).getSecretKey(), Bytes.of(3))));
+    final SafeFuture<Boolean> valid = executeValidVerify(1, 1);
+    final SafeFuture<Boolean> invalid = executeInvalidVerify(2, 2);
+    final List<SignatureTask> tasks = getPendingTasks();
+
+    service.batchVerifySignatures(tasks); // must not throw
+    completionRunner.executeQueuedActions();
+
+    assertThat(valid).isCompletedWithValue(true);
+    assertThat(invalid).isCompletedWithValue(false);
+    assertThat(malformedMissingSignature).isCompletedExceptionally();
+    assertThat(malformedOnlySignature).isCompletedExceptionally();
+  }
+
+  @Test
+  public void strictThreadLimit_fallbackVerifiesMultiSignatureTasksOnTheCallingThread() {
+    final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
+    BLS.setBlsImplementation(recording);
+    try {
+      startService();
+      final SafeFuture<Boolean> multi = executeAllValidListVerify(8);
+      final SafeFuture<Boolean> invalid = executeInvalidVerify(9, 9);
+      final List<SignatureTask> tasks = getPendingTasks();
+
+      service.batchVerifySignatures(tasks); // batch fails, falls back to individual tasks
+      completionRunner.executeQueuedActions();
+
+      assertThat(multi).isCompletedWithValue(true);
+      assertThat(invalid).isCompletedWithValue(false);
+      assertThat(recording.getPrepareThreadNames()).isNotEmpty();
+      assertThat(recording.getPrepareThreadNames()).containsOnly(Thread.currentThread().getName());
+    } finally {
+      BLS.resetBlsImplementation();
+    }
+  }
+
+  @Test
+  public void strictThreadLimit_exceptionFallbackVerifiesMultiSignatureTasksOnTheCallingThread() {
+    final RecordingBLS12381 recording = new RecordingBLS12381(BlstLoader.INSTANCE.orElseThrow());
+    BLS.setBlsImplementation(recording);
+    try {
+      startService();
+      final SafeFuture<Boolean> multi = executeAllValidListVerify(8);
+      // Mismatched key / message / signature list sizes make verification throw for this task.
+      final SafeFuture<Boolean> malformed =
+          service.verify(
+              List.of(List.of(KEYS.get(9).getPublicKey())), List.of(Bytes.of(9)), List.of());
+      final List<SignatureTask> tasks = getPendingTasks();
+
+      service.verifyTasksIndividually(tasks);
+      completionRunner.executeQueuedActions();
+
+      assertThat(multi).isCompletedWithValue(true);
+      assertThat(malformed).isCompletedExceptionally();
+      assertThat(recording.getPrepareThreadNames()).isNotEmpty();
+      assertThat(recording.getPrepareThreadNames()).containsOnly(Thread.currentThread().getName());
+    } finally {
+      BLS.resetBlsImplementation();
+    }
+  }
+
   @SuppressWarnings("FutureReturnValueIgnored")
   @Test
   public void splitTasks_evenNumber() {
@@ -560,6 +634,17 @@ public class AggregatingSignatureVerificationServiceTest {
               : BLSSignature.empty());
     }
     return service.verify(publicKeys, messages, signatures);
+  }
+
+  /** One task with {@code count} valid signatures, each over a distinct key and message. */
+  private SafeFuture<Boolean> executeAllValidListVerify(final int count) {
+    final IntList indices = new IntArrayList();
+    final BooleanList useValidSignatures = new BooleanArrayList();
+    for (int i = 0; i < count; i++) {
+      indices.add(i);
+      useValidSignatures.add(true);
+    }
+    return executeListVerify(indices, indices, useValidSignatures);
   }
 
   private void runPendingTasks() {

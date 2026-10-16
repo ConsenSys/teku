@@ -32,7 +32,6 @@ import org.hyperledger.besu.plugin.services.metrics.Counter;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.AsyncRunnerFactory;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -213,14 +212,20 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
         continue;
       }
       try {
-        final boolean taskIsValid =
-            BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
-        task.completeAsync(taskIsValid);
+        task.completeAsync(verifyTaskSignatures(task));
       } catch (final RuntimeException ex) {
         // Isolate the failure to this task so the rest of the batch still completes.
         task.completeExceptionallyAsync(ex);
       }
     }
+  }
+
+  /** Verifies one task's signatures with the configured thread policy. */
+  private boolean verifyTaskSignatures(final SignatureTask task) {
+    return strictThreadLimitEnabled
+        ? BLS.batchVerify(
+            task.publicKeys, task.messages, task.signatures, task.publicKeys.size() > 1, false)
+        : BLS.batchVerify(task.publicKeys, task.messages, task.signatures);
   }
 
   @VisibleForTesting
@@ -301,11 +306,7 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       }
     } else {
       // Validate each signature individually
-      for (SignatureTask task : tasks) {
-        final boolean taskIsValid =
-            BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
-        task.completeAsync(taskIsValid);
-      }
+      verifyTasksIndividually(tasks);
     }
   }
 
