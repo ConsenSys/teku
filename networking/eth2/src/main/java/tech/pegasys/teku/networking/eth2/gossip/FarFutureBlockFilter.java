@@ -74,7 +74,7 @@ class FarFutureBlockFilter implements DecodedPrefixFilter {
     final UInt64 maxCurrentSlot =
         spec.getCurrentSlotFromTimeMillis(maxTimeMillis, recentChainData.getGenesisTimeMillis());
     final UInt64 slot = maybeSlot.get();
-    if (slot.isGreaterThan(maxCurrentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE))) {
+    if (FutureBlockPool.isBeyondFutureSlotTolerance(slot, maxCurrentSlot)) {
       LOG.trace(
           "Ignoring gossip block for slot {} which is too far beyond current slot {}",
           slot,

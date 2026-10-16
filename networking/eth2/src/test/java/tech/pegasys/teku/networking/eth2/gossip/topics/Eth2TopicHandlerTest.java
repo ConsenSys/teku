@@ -370,7 +370,7 @@ public class Eth2TopicHandlerTest {
               filteredPrefixes.add(prefix);
               return false;
             },
-            Optional.empty());
+            GossipInFlightLimiter.UNLIMITED);
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
@@ -393,7 +393,7 @@ public class Eth2TopicHandlerTest {
             (b, __) -> SafeFuture.completedFuture(InternalValidationResult.ACCEPT),
             debugDataDumper,
             prefix -> true,
-            Optional.empty());
+            GossipInFlightLimiter.UNLIMITED);
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
@@ -412,7 +412,7 @@ public class Eth2TopicHandlerTest {
             processor,
             debugDataDumper,
             prefix -> false,
-            Optional.empty());
+            GossipInFlightLimiter.UNLIMITED);
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(
@@ -440,7 +440,7 @@ public class Eth2TopicHandlerTest {
             (b, __) -> validations.removeFirst(),
             debugDataDumper,
             DecodedPrefixFilter.ACCEPT_ALL,
-            Optional.of(limiter));
+            limiter);
 
     final SafeFuture<ValidationResult> first =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
@@ -489,7 +489,7 @@ public class Eth2TopicHandlerTest {
             processor,
             debugDataDumper,
             DecodedPrefixFilter.ACCEPT_ALL,
-            Optional.of(limiter));
+            limiter);
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
@@ -510,7 +510,7 @@ public class Eth2TopicHandlerTest {
             processor,
             debugDataDumper,
             DecodedPrefixFilter.ACCEPT_ALL,
-            Optional.of(limiter));
+            limiter);
     final Bytes invalidBytes = Bytes.fromHexString("0x0102");
 
     final SafeFuture<ValidationResult> result =
@@ -562,7 +562,7 @@ public class Eth2TopicHandlerTest {
           processor,
           debugDataDumper,
           DecodedPrefixFilter.ACCEPT_ALL,
-          Optional.empty());
+          GossipInFlightLimiter.UNLIMITED);
     }
 
     protected MockEth2TopicHandler(
@@ -572,7 +572,7 @@ public class Eth2TopicHandlerTest {
         final OperationProcessor<SignedBeaconBlock> processor,
         final DebugDataDumper debugDataDumper,
         final DecodedPrefixFilter decodedPrefixFilter,
-        final Optional<GossipInFlightLimiter> inFlightLimiter) {
+        final GossipInFlightLimiter inFlightLimiter) {
       super(
           recentChainData,
           asyncRunner,

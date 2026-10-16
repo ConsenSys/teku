@@ -63,7 +63,7 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
   private final DebugDataDumper debugDataDumper;
   private final String topic;
   private final DecodedPrefixFilter decodedPrefixFilter;
-  private final Optional<GossipInFlightLimiter> inFlightLimiter;
+  private final GossipInFlightLimiter inFlightLimiter;
   final TimeProvider timeProvider;
 
   // every slot of mainnet config
@@ -92,7 +92,7 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
         networkingConfig,
         debugDataDumper,
         DecodedPrefixFilter.ACCEPT_ALL,
-        Optional.empty());
+        GossipInFlightLimiter.UNLIMITED);
   }
 
   /**
@@ -113,7 +113,7 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
       final NetworkingSpecConfig networkingConfig,
       final DebugDataDumper debugDataDumper,
       final DecodedPrefixFilter decodedPrefixFilter,
-      final Optional<GossipInFlightLimiter> inFlightLimiter) {
+      final GossipInFlightLimiter inFlightLimiter) {
     this.decodedPrefixFilter = decodedPrefixFilter;
     this.inFlightLimiter = inFlightLimiter;
     this.asyncRunner = asyncRunner;
@@ -165,26 +165,24 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
       LOG.trace("Ignoring message for topic {} before decoding it", this::getTopic);
       return SafeFuture.completedFuture(ValidationResult.Ignore);
     }
-    if (inFlightLimiter.isEmpty()) {
-      return queueForProcessing(message);
-    }
-    final GossipInFlightLimiter limiter = inFlightLimiter.get();
     final long messageBytes =
         decodedMessagePrefix
             .map(DecodedMessagePrefix::decodedSize)
             .orElseGet(() -> message.getOriginalMessage().size());
-    if (!limiter.tryAcquire(messageBytes)) {
+    if (!inFlightLimiter.tryAcquire(messageBytes)) {
       loggerThrottler.invoke(
           timeProvider.getTimeInSeconds(),
           (log) ->
               log.warn(
-                  "Discarding gossip message for topic {} because messages already being processed"
-                      + " for the topic are over the {} bytes limit",
+                  "Discarded {} gossip messages for topic {} since the last warning because"
+                      + " messages already being processed for the topic were over the {} bytes"
+                      + " limit",
+                  inFlightLimiter.takeDiscardedSinceLastReport(),
                   getTopic(),
-                  limiter.getMaxInFlightBytes()));
+                  inFlightLimiter.getMaxInFlightBytes()));
       return SafeFuture.completedFuture(ValidationResult.Ignore);
     }
-    return queueForProcessing(message).alwaysRun(() -> limiter.release(messageBytes));
+    return queueForProcessing(message).alwaysRun(() -> inFlightLimiter.release(messageBytes));
   }
 
   private SafeFuture<ValidationResult> queueForProcessing(final PreparedGossipMessage message) {

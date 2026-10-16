@@ -67,12 +67,11 @@ public class BlockGossipManager extends AbstractGossipManager<SignedBeaconBlock>
         GossipFailureLogger.createNonSuppressing(GossipTopicName.BEACON_BLOCK.toString()),
         debugDataDumper,
         new FarFutureBlockFilter(spec, recentChainData, metricsSystem),
-        Optional.of(
-            new GossipInFlightLimiter(
-                metricsSystem,
-                GossipTopicName.BEACON_BLOCK.toString(),
-                (long) MAX_IN_FLIGHT_BYTES_MAX_PAYLOAD_SIZE_MULTIPLIER
-                    * spec.getNetworkingConfig().getMaxPayloadSize())));
+        new GossipInFlightLimiter(
+            metricsSystem,
+            GossipTopicName.BEACON_BLOCK.toString(),
+            (long) MAX_IN_FLIGHT_BYTES_MAX_PAYLOAD_SIZE_MULTIPLIER
+                * spec.getNetworkingConfig().getMaxPayloadSize()));
   }
 
   public SafeFuture<Void> publishBlock(final SignedBeaconBlock message) {

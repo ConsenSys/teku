@@ -28,17 +28,27 @@ import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
  * it is decoded.
  */
 public class GossipInFlightLimiter {
+  /** Admits every message without tracking anything, for topics that don't need a limit. */
+  public static final GossipInFlightLimiter UNLIMITED =
+      new GossipInFlightLimiter(
+          Long.MAX_VALUE,
+          new Counter() {
+            @Override
+            public void inc() {}
+
+            @Override
+            public void inc(final long amount) {}
+          });
+
   private final long maxInFlightBytes;
   private final Counter discardedCounter;
   private final AtomicLong inFlightBytes = new AtomicLong();
+  private final AtomicLong discardedSinceLastReport = new AtomicLong();
 
   public GossipInFlightLimiter(
       final MetricsSystem metricsSystem, final String topicName, final long maxInFlightBytes) {
-    if (maxInFlightBytes <= 0) {
-      throw new IllegalArgumentException("Max in-flight bytes must be positive");
-    }
-    this.maxInFlightBytes = maxInFlightBytes;
-    this.discardedCounter =
+    this(
+        maxInFlightBytes,
         metricsSystem
             .createLabelledCounter(
                 TekuMetricCategory.NETWORK,
@@ -46,7 +56,15 @@ public class GossipInFlightLimiter {
                 "Total number of gossip messages discarded because the messages for the topic"
                     + " already being processed were too large in total",
                 "topic")
-            .labels(topicName);
+            .labels(topicName));
+  }
+
+  private GossipInFlightLimiter(final long maxInFlightBytes, final Counter discardedCounter) {
+    if (maxInFlightBytes <= 0) {
+      throw new IllegalArgumentException("Max in-flight bytes must be positive");
+    }
+    this.maxInFlightBytes = maxInFlightBytes;
+    this.discardedCounter = discardedCounter;
   }
 
   /**
@@ -57,10 +75,14 @@ public class GossipInFlightLimiter {
    *     with the same size once it is processed
    */
   public boolean tryAcquire(final long messageBytes) {
+    if (isUnlimited()) {
+      return true;
+    }
     while (true) {
       final long current = inFlightBytes.get();
       if (current + messageBytes > maxInFlightBytes) {
         discardedCounter.inc();
+        discardedSinceLastReport.incrementAndGet();
         return false;
       }
       if (inFlightBytes.compareAndSet(current, current + messageBytes)) {
@@ -70,7 +92,14 @@ public class GossipInFlightLimiter {
   }
 
   public void release(final long messageBytes) {
-    inFlightBytes.addAndGet(-messageBytes);
+    if (!isUnlimited()) {
+      inFlightBytes.addAndGet(-messageBytes);
+    }
+  }
+
+  /** Returns the number of messages discarded since the last call, and resets it. */
+  public long takeDiscardedSinceLastReport() {
+    return discardedSinceLastReport.getAndSet(0);
   }
 
   public long getInFlightBytes() {
@@ -79,5 +108,9 @@ public class GossipInFlightLimiter {
 
   public long getMaxInFlightBytes() {
     return maxInFlightBytes;
+  }
+
+  private boolean isUnlimited() {
+    return maxInFlightBytes == Long.MAX_VALUE;
   }
 }

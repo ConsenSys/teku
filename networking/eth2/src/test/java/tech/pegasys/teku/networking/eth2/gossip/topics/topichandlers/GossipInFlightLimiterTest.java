@@ -64,6 +64,33 @@ class GossipInFlightLimiterTest {
   }
 
   @Test
+  void shouldCountDiscardsSinceLastReport() {
+    assertThat(limiter.tryAcquire(100)).isTrue();
+    assertThat(limiter.tryAcquire(1)).isFalse();
+    assertThat(limiter.tryAcquire(1)).isFalse();
+
+    assertThat(limiter.takeDiscardedSinceLastReport()).isEqualTo(2);
+    assertThat(limiter.takeDiscardedSinceLastReport()).isZero();
+
+    assertThat(limiter.tryAcquire(1)).isFalse();
+    assertThat(limiter.takeDiscardedSinceLastReport()).isEqualTo(1);
+    assertThat(getDiscardedCount()).isEqualTo(3);
+  }
+
+  @Test
+  void unlimitedShouldAdmitEverythingWithoutTracking() {
+    final GossipInFlightLimiter unlimited = GossipInFlightLimiter.UNLIMITED;
+
+    assertThat(unlimited.tryAcquire(Long.MAX_VALUE)).isTrue();
+    assertThat(unlimited.tryAcquire(Long.MAX_VALUE)).isTrue();
+    assertThat(unlimited.getInFlightBytes()).isZero();
+
+    unlimited.release(Long.MAX_VALUE);
+    assertThat(unlimited.getInFlightBytes()).isZero();
+    assertThat(unlimited.takeDiscardedSinceLastReport()).isZero();
+  }
+
+  @Test
   void shouldRejectNonPositiveLimit() {
     assertThatThrownBy(() -> new GossipInFlightLimiter(metricsSystem, TOPIC, 0))
         .isInstanceOf(IllegalArgumentException.class);

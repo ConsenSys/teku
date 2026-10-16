@@ -97,6 +97,14 @@ public class FutureBlockPool {
         "result");
   }
 
+  /**
+   * Returns true if a block for {@code slot} is too far ahead of {@code currentSlot} to be queued
+   * for future processing.
+   */
+  public static boolean isBeyondFutureSlotTolerance(final UInt64 slot, final UInt64 currentSlot) {
+    return slot.isGreaterThan(currentSlot.plus(FUTURE_SLOT_TOLERANCE));
+  }
+
   public synchronized void onSlot(final UInt64 slot) {
     currentSlot = slot;
   }
@@ -109,7 +117,7 @@ public class FutureBlockPool {
    */
   public synchronized boolean add(final SignedBeaconBlock block) {
     final UInt64 slot = block.getSlot();
-    if (slot.isGreaterThan(currentSlot.plus(FUTURE_SLOT_TOLERANCE))) {
+    if (isBeyondFutureSlotTolerance(slot, currentSlot)) {
       // Block is too far in the future
       droppedCounter.inc();
       return false;

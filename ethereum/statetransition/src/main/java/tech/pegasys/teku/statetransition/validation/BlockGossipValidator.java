@@ -106,8 +106,8 @@ public class BlockGossipValidator {
      * Blocks too far in the future to be queued for later processing are ignored before the block
      * root is computed for the equivocation check, which can take a long time for a large block.
      */
-    if (gossipValidationHelper.isSlotBeyondFutureTolerance(
-        block.getSlot(), FutureBlockPool.FUTURE_SLOT_TOLERANCE)) {
+    if (FutureBlockPool.isBeyondFutureSlotTolerance(
+        block.getSlot(), gossipValidationHelper.getMaxCurrentSlot())) {
       LOG.trace(
           "BlockValidator: Block slot {} is too far in the future. Dropping.", block.getSlot());
       return completedFuture(InternalValidationResult.IGNORE);

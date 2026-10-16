@@ -147,16 +147,9 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
-  void isSlotBeyondFutureTolerance_shouldComputeCorrectly() {
-    final UInt64 tolerance = UInt64.valueOf(2);
-    final UInt64 slot4 = UInt64.valueOf(4);
-
+  void getMaxCurrentSlot_shouldAllowForClockDisparity() {
     storageSystem.chainUpdater().setCurrentSlot(UInt64.ONE);
-    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(UInt64.valueOf(3), tolerance))
-        .isFalse();
-    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(slot4, tolerance)).isTrue();
-    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(UInt64.MAX_VALUE, tolerance))
-        .isTrue();
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.ONE);
 
     final UInt64 slot2TimeMillis =
         spec.computeTimeMillisAtSlot(
@@ -167,12 +160,12 @@ public class GossipValidationHelperTest {
     final UInt64 notYetInsideTolerance =
         slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis()).decrement();
     storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
-    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(slot4, tolerance)).isTrue();
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.ONE);
 
     final UInt64 insideTolerance =
         slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
     storageSystem.chainUpdater().setTimeMillis(insideTolerance);
-    assertThat(gossipValidationHelper.isSlotBeyondFutureTolerance(slot4, tolerance)).isFalse();
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.valueOf(2));
   }
 
   @TestTemplate

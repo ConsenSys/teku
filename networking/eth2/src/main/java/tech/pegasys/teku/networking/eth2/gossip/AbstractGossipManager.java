@@ -81,7 +81,7 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
         gossipFailureLogger,
         debugDataDumper,
         DecodedPrefixFilter.ACCEPT_ALL,
-        Optional.empty());
+        GossipInFlightLimiter.UNLIMITED);
   }
 
   protected AbstractGossipManager(
@@ -100,7 +100,7 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
       final GossipFailureLogger gossipFailureLogger,
       final DebugDataDumper debugDataDumper,
       final DecodedPrefixFilter decodedPrefixFilter,
-      final Optional<GossipInFlightLimiter> inFlightLimiter) {
+      final GossipInFlightLimiter inFlightLimiter) {
     this.gossipNetwork = gossipNetwork;
     this.topicHandler =
         new Eth2TopicHandler<>(
