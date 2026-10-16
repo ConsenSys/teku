@@ -384,6 +384,9 @@ public class AggregatingSignatureVerificationServiceTest {
     try {
       startService();
       final SafeFuture<Boolean> multi = executeAllValidListVerify(8);
+      // Two tasks whose signatures all share one message, so they go through same-message prepare
+      final SafeFuture<Boolean> sameMessage1 = executeSameMessageListVerify(10, 3, 42);
+      final SafeFuture<Boolean> sameMessage2 = executeSameMessageListVerify(13, 2, 42);
       final SafeFuture<Boolean> invalid = executeInvalidVerify(9, 9);
       final List<SignatureTask> tasks = getPendingTasks();
 
@@ -391,9 +394,13 @@ public class AggregatingSignatureVerificationServiceTest {
       completionRunner.executeQueuedActions();
 
       assertThat(multi).isCompletedWithValue(true);
+      assertThat(sameMessage1).isCompletedWithValue(true);
+      assertThat(sameMessage2).isCompletedWithValue(true);
       assertThat(invalid).isCompletedWithValue(false);
       assertThat(recording.getPrepareThreadNames()).isNotEmpty();
       assertThat(recording.getPrepareThreadNames()).containsOnly(Thread.currentThread().getName());
+      assertThat(recording.getSameMessageParallelArguments()).isNotEmpty();
+      assertThat(recording.getSameMessageParallelArguments()).containsOnly(false);
     } finally {
       BLS.resetBlsImplementation();
     }
@@ -406,6 +413,9 @@ public class AggregatingSignatureVerificationServiceTest {
     try {
       startService();
       final SafeFuture<Boolean> multi = executeAllValidListVerify(8);
+      // Two tasks whose signatures all share one message, so they go through same-message prepare
+      final SafeFuture<Boolean> sameMessage1 = executeSameMessageListVerify(10, 3, 42);
+      final SafeFuture<Boolean> sameMessage2 = executeSameMessageListVerify(13, 2, 42);
       // Mismatched key / message / signature list sizes make verification throw for this task.
       final SafeFuture<Boolean> malformed =
           service.verify(
@@ -416,9 +426,13 @@ public class AggregatingSignatureVerificationServiceTest {
       completionRunner.executeQueuedActions();
 
       assertThat(multi).isCompletedWithValue(true);
+      assertThat(sameMessage1).isCompletedWithValue(true);
+      assertThat(sameMessage2).isCompletedWithValue(true);
       assertThat(malformed).isCompletedExceptionally();
       assertThat(recording.getPrepareThreadNames()).isNotEmpty();
       assertThat(recording.getPrepareThreadNames()).containsOnly(Thread.currentThread().getName());
+      assertThat(recording.getSameMessageParallelArguments()).isNotEmpty();
+      assertThat(recording.getSameMessageParallelArguments()).containsOnly(false);
     } finally {
       BLS.resetBlsImplementation();
     }
@@ -645,6 +659,21 @@ public class AggregatingSignatureVerificationServiceTest {
       useValidSignatures.add(true);
     }
     return executeListVerify(indices, indices, useValidSignatures);
+  }
+
+  /** One task with {@code count} valid signatures from consecutive keys, all over one message. */
+  private SafeFuture<Boolean> executeSameMessageListVerify(
+      final int firstKeyIndex, final int count, final int data) {
+    final Bytes message = Bytes.of(data);
+    final List<List<BLSPublicKey>> publicKeys = new ArrayList<>();
+    final List<Bytes> messages = new ArrayList<>();
+    final List<BLSSignature> signatures = new ArrayList<>();
+    for (int i = firstKeyIndex; i < firstKeyIndex + count; i++) {
+      publicKeys.add(List.of(KEYS.get(i).getPublicKey()));
+      messages.add(message);
+      signatures.add(BLS.sign(KEYS.get(i).getSecretKey(), message));
+    }
+    return service.verify(publicKeys, messages, signatures);
   }
 
   private void runPendingTasks() {

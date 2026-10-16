@@ -29,9 +29,9 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
-import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.SameMessageBatchVerifier;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.AsyncRunnerFactory;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -222,10 +222,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
 
   /** Verifies one task's signatures with the configured thread policy. */
   private boolean verifyTaskSignatures(final SignatureTask task) {
-    return strictThreadLimitEnabled
-        ? BLS.batchVerify(
-            task.publicKeys, task.messages, task.signatures, task.publicKeys.size() > 1, false)
-        : BLS.batchVerify(task.publicKeys, task.messages, task.signatures);
+    return SameMessageBatchVerifier.batchVerify(
+        task.publicKeys, task.messages, task.signatures, !strictThreadLimitEnabled);
   }
 
   @VisibleForTesting
@@ -288,9 +286,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     }
 
     final boolean batchIsValid =
-        strictThreadLimitEnabled
-            ? BLS.batchVerify(allKeys, allMessages, allSignatures, allKeys.size() > 1, false)
-            : BLS.batchVerify(allKeys, allMessages, allSignatures);
+        SameMessageBatchVerifier.batchVerify(
+            allKeys, allMessages, allSignatures, !strictThreadLimitEnabled);
     if (batchIsValid) {
       for (SignatureTask task : tasks) {
         task.completeAsync(true);
