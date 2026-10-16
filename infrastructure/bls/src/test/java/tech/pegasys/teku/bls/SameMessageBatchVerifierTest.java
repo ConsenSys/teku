@@ -15,10 +15,12 @@ package tech.pegasys.teku.bls;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,6 +30,22 @@ import tech.pegasys.teku.bls.impl.BlsException;
 public class SameMessageBatchVerifierTest {
 
   private static final Bytes OTHER_MESSAGE = Bytes.wrap("other message".getBytes(UTF_8));
+
+  /**
+   * A fixed 96-byte encoding that blst cannot decode: the compression and infinity flags are set
+   * but the remaining bits are not all zero.
+   */
+  private static final Bytes UNDECODABLE_SIGNATURE_BYTES =
+      Bytes.fromHexString(
+          "0x"
+              + "c000000000000000000000000000000000000000000000000000000000000000"
+              + "0000000000000000000000000000000000000000000000000000000000000000"
+              + "0000000000000000000000000000000000000000000000000000000000000001");
+
+  /** Indices 0-2 share one message (a same-message group), indices 3-5 have distinct messages. */
+  private static final int INDEX_IN_GROUP = 1;
+
+  private static final int INDEX_OF_SINGLETON = 4;
 
   @Test
   void verifiesManySignaturesOverTheSameMessage() {
@@ -204,11 +222,81 @@ public class SameMessageBatchVerifierTest {
       messages.add(message);
       signatures.add(BLS.sign(keyPair.getSecretKey(), message));
     }
-    signatures.set(2, BLSSignature.fromBytesCompressed(Bytes.random(96)));
+    signatures.set(2, undecodableSignature());
 
     assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, false))
         .isFalse();
     assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, true))
         .isFalse();
+  }
+
+  @Test
+  void invalidSignatureFixturesFailWhereExpected() {
+    assertThatThrownBy(() -> undecodableSignature().getSignature())
+        .isInstanceOf(BlsException.class);
+    assertThatCode(() -> BLSTest.notInG2().getSignature()).doesNotThrowAnyException();
+    assertThat(BLSTest.notInG2().isValid()).isFalse();
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void returnsFalseForASignatureNotInG2InsideASameMessageGroup(final boolean parallel) {
+    assertRejectedWithoutException(INDEX_IN_GROUP, BLSTest.notInG2(), parallel);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void returnsFalseForASignatureNotInG2AsADistinctMessageSingleton(final boolean parallel) {
+    assertRejectedWithoutException(INDEX_OF_SINGLETON, BLSTest.notInG2(), parallel);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void returnsFalseForAnUndecodableSignatureInsideASameMessageGroup(final boolean parallel) {
+    assertRejectedWithoutException(INDEX_IN_GROUP, undecodableSignature(), parallel);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void returnsFalseForAnUndecodableSignatureAsADistinctMessageSingleton(final boolean parallel) {
+    assertRejectedWithoutException(INDEX_OF_SINGLETON, undecodableSignature(), parallel);
+  }
+
+  private static BLSSignature undecodableSignature() {
+    return BLSSignature.fromBytesCompressed(UNDECODABLE_SIGNATURE_BYTES);
+  }
+
+  /**
+   * Builds a batch with one same-message group and three distinct-message singletons, checks it
+   * verifies, then replaces the signature at {@code index} and checks the batch is rejected by
+   * returning false rather than by throwing.
+   */
+  private static void assertRejectedWithoutException(
+      final int index, final BLSSignature invalidSignature, final boolean parallel) {
+    final Bytes sharedMessage = Bytes.wrap("shared message".getBytes(UTF_8));
+    final List<List<BLSPublicKey>> publicKeys = new ArrayList<>();
+    final List<Bytes> messages = new ArrayList<>();
+    final List<BLSSignature> signatures = new ArrayList<>();
+    for (int i = 0; i < 6; i++) {
+      final BLSKeyPair keyPair = BLSTestUtil.randomKeyPair(400 + i);
+      final Bytes message =
+          i < 3 ? sharedMessage : Bytes.wrap(("distinct message " + i).getBytes(UTF_8));
+      publicKeys.add(List.of(keyPair.getPublicKey()));
+      messages.add(message);
+      signatures.add(BLS.sign(keyPair.getSecretKey(), message));
+    }
+    assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, parallel))
+        .isTrue();
+
+    signatures.set(index, invalidSignature);
+
+    final AtomicReference<Boolean> result = new AtomicReference<>();
+    assertThatCode(
+            () ->
+                result.set(
+                    SameMessageBatchVerifier.batchVerify(
+                        publicKeys, messages, signatures, parallel)))
+        .doesNotThrowAnyException();
+    assertThat(result.get()).isFalse();
   }
 }

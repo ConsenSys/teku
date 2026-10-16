@@ -188,8 +188,9 @@ public interface BLS12381 {
    * pairing and exponentiation
    *
    * @param preparedList the list of instances returned by {@link #prepareBatchVerify(int, List,
-   *     Bytes, Signature)} or {@link #prepareBatchVerify2(int, List, Bytes, Signature, List, Bytes,
-   *     Signature)} or mixed from both
+   *     Bytes, Signature)}, {@link #prepareBatchVerify2(int, List, Bytes, Signature, List, Bytes,
+   *     Signature)}, {@link #prepareBatchVerifySameMessage(int, List, Bytes, List, boolean)} or
+   *     {@link #prepareBatchVerifyChunk(int, List, List, List)}, or mixed from any of them
    * @return True if the verification is successful, false otherwise
    */
   boolean completeBatchVerify(List<? extends BatchSemiAggregate> preparedList);

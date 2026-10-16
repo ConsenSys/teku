@@ -579,6 +579,7 @@ public class P2POptions {
   @Option(
       names = {"--Xp2p-batch-verify-signatures-mode"},
       paramLabel = "<MODE>",
+      showDefaultValue = Visibility.ALWAYS,
       description =
           "Signature verification batching: LEGACY drains whatever is queued; GATHER_AND_GROUP"
               + " gathers a batch for up to the gather timeout and verifies signatures over the"
@@ -593,7 +594,7 @@ public class P2POptions {
       description =
           "After the first task of a signature verification batch arrives, keep gathering tasks for"
               + " up to this many milliseconds so that batches are large enough to amortise the"
-              + " pairing cost",
+              + " pairing cost. Applies only in GATHER_AND_GROUP mode and is ignored in LEGACY mode",
       arity = "1",
       hidden = true)
   private int batchVerifyGatherTimeoutMillis = P2PConfig.DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS;

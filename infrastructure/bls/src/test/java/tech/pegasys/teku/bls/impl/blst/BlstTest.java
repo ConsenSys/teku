@@ -29,6 +29,7 @@ import supranational.blst.P2;
 import tech.pegasys.teku.bls.BatchSemiAggregate;
 import tech.pegasys.teku.bls.impl.AbstractBLS12381Test;
 import tech.pegasys.teku.bls.impl.BLS12381;
+import tech.pegasys.teku.bls.impl.BlsException;
 
 public class BlstTest extends AbstractBLS12381Test {
   private static final Random RANDOM = new Random(1);
@@ -191,7 +192,7 @@ public class BlstTest extends AbstractBLS12381Test {
         List.of(BlstBLS12381.sign(secretKeys.get(0), msg), notInG2());
 
     assertThrows(
-        IllegalArgumentException.class,
+        BlsException.class,
         () -> bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false));
   }
 
@@ -358,7 +359,7 @@ public class BlstTest extends AbstractBLS12381Test {
         List.of(chunk.signatures().get(0), notInG2(), chunk.signatures().get(2));
 
     assertThrows(
-        IllegalArgumentException.class,
+        BlsException.class,
         () -> bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), signatures));
   }
 
