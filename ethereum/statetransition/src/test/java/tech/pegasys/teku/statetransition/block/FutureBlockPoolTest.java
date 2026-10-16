@@ -43,6 +43,17 @@ class FutureBlockPoolTest {
   private final Map<SignedBeaconBlock, Long> blockSizes = new HashMap<>();
 
   @Test
+  void isBeyondFutureSlotTolerance_shouldAllowUpToTolerance() {
+    final UInt64 lastAccepted = currentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE);
+
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(currentSlot, currentSlot)).isFalse();
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(lastAccepted, currentSlot)).isFalse();
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(lastAccepted.plus(1), currentSlot))
+        .isTrue();
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(UInt64.MAX_VALUE, currentSlot)).isTrue();
+  }
+
+  @Test
   void add_acceptsBlocksUpToTolerance() {
     final FutureBlockPool futureBlocks = create(16, 100);
     final SignedBeaconBlock block =

@@ -16,12 +16,19 @@ package tech.pegasys.teku.statetransition.validation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
 
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +61,7 @@ import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceStateProvider;
@@ -166,6 +174,70 @@ public class BlockGossipValidatorTest {
 
     assertThat(blockGossipValidator.validate(block, true))
         .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
+  }
+
+  @TestTemplate
+  void shouldIgnoreBlockBeyondFutureSlotToleranceBeforeComputingItsRoot() {
+    final UInt64 farFutureSlot =
+        recentChainData
+            .getCurrentSlot()
+            .orElseThrow()
+            .plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE)
+            .plus(1);
+    final SignedBeaconBlock block = mock(SignedBeaconBlock.class);
+    when(block.getSlot()).thenReturn(farFutureSlot);
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.IGNORE);
+    verify(block, never()).getRoot();
+    verify(block, never()).getMessage();
+  }
+
+  @TestTemplate
+  void shouldSaveForFutureBlockAtFutureSlotTolerance() {
+    final UInt64 futureSlot =
+        recentChainData.getCurrentSlot().orElseThrow().plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE);
+    final SignedBeaconBlock block =
+        storageSystem.chainBuilder().generateBlockAtSlot(futureSlot).getBlock();
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
+  }
+
+  @TestTemplate
+  void shouldComputeBlockRootOutsideEquivocationCheckLock() throws Exception {
+    final CountDownLatch hashingStarted = new CountDownLatch(1);
+    final CountDownLatch finishHashing = new CountDownLatch(1);
+    final SignedBeaconBlock block = mock(SignedBeaconBlock.class);
+    final BeaconBlock message = mock(BeaconBlock.class);
+    when(block.getSlot()).thenReturn(ONE);
+    when(block.getMessage()).thenReturn(message);
+    when(message.getProposerIndex()).thenReturn(ONE);
+    when(block.getRoot())
+        .thenAnswer(
+            __ -> {
+              hashingStarted.countDown();
+              finishHashing.await();
+              return Bytes32.ZERO;
+            });
+    final ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      final Future<EquivocationCheckResult> result =
+          executor.submit(() -> blockGossipValidator.performBlockEquivocationCheck(true, block));
+      assertThat(hashingStarted.await(10, TimeUnit.SECONDS)).isTrue();
+
+      // would wait for the lock if the root was computed while holding it
+      final Future<Boolean> isEquivocating =
+          executor.submit(() -> blockGossipValidator.isBlockEquivocating(ONE, ONE, Bytes32.ZERO));
+      assertThat(isEquivocating.get(10, TimeUnit.SECONDS)).isFalse();
+
+      finishHashing.countDown();
+      assertThat(result.get(10, TimeUnit.SECONDS))
+          .isEqualTo(EquivocationCheckResult.FIRST_BLOCK_FOR_SLOT_PROPOSER);
+    } finally {
+      finishHashing.countDown();
+      executor.shutdownNow();
+    }
   }
 
   @TestTemplate
