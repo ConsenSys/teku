@@ -164,6 +164,26 @@ public interface BLS12381 {
   /**
    * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
    *
+   * <p>Prepares several (public keys, message, signature) entries sequentially in one pairing
+   * context. Each entry gets its own random multiplier, exactly as in {@link
+   * #prepareBatchVerify(int, List, Bytes, Signature)}, but the pairs share one multi-pair Miller
+   * loop. The result can be mixed with the results of the other prepare methods.
+   *
+   * @param index index of the first signature in a batch
+   * @param publicKeys one list of public keys per entry (aggregated per entry)
+   * @param messages one message per entry, same size as publicKeys
+   * @param signatures one signature per entry, same size as publicKeys
+   * @return the accumulated values in an opaque instance
+   */
+  BatchSemiAggregate prepareBatchVerifyChunk(
+      int index,
+      List<? extends List<? extends PublicKey>> publicKeys,
+      List<Bytes> messages,
+      List<? extends Signature> signatures);
+
+  /**
+   * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
+   *
    * <p>Does the final job of batch verification: calculates the final product and sum, does final
    * pairing and exponentiation
    *

@@ -15,6 +15,7 @@ package tech.pegasys.teku.bls;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.common.collect.Lists;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,12 @@ import tech.pegasys.teku.bls.impl.BlsException;
  */
 public final class SameMessageBatchVerifier {
   private static final Logger LOG = LogManager.getLogger();
+
+  /**
+   * Signatures whose message is unique are prepared this many at a time in one blst pairing
+   * context, which runs one multi-pair Miller loop for the whole chunk.
+   */
+  private static final int SINGLETON_CHUNK_SIZE = 8;
 
   private SameMessageBatchVerifier() {}
 
@@ -69,16 +76,11 @@ public final class SameMessageBatchVerifier {
         indicesByMessage.computeIfAbsent(messages.get(i), __ -> new ArrayList<>()).add(i);
       }
       final List<Supplier<BatchSemiAggregate>> work = new ArrayList<>();
+      final List<Integer> singletons = new ArrayList<>();
       for (final List<Integer> group : indicesByMessage.values()) {
         final int firstIndex = group.getFirst();
         if (group.size() == 1) {
-          work.add(
-              () ->
-                  BLS.prepareBatchVerify(
-                      firstIndex,
-                      publicKeys.get(firstIndex),
-                      messages.get(firstIndex),
-                      signatures.get(firstIndex)));
+          singletons.add(firstIndex);
         } else {
           work.add(
               () ->
@@ -89,6 +91,15 @@ public final class SameMessageBatchVerifier {
                       group.stream().map(signatures::get).toList(),
                       parallel));
         }
+      }
+      for (final List<Integer> chunk : Lists.partition(singletons, SINGLETON_CHUNK_SIZE)) {
+        work.add(
+            () ->
+                prepareBatchVerifyChunk(
+                    chunk.getFirst(),
+                    chunk.stream().map(publicKeys::get).toList(),
+                    chunk.stream().map(messages::get).toList(),
+                    chunk.stream().map(signatures::get).toList()));
       }
 
       Stream<Supplier<BatchSemiAggregate>> workStream = work.stream();
@@ -123,6 +134,29 @@ public final class SameMessageBatchVerifier {
               message,
               signatures.stream().map(BLSSignature::getSignature).toList(),
               parallel);
+    } catch (BlsException e) {
+      return new InvalidBatchSemiAggregate();
+    }
+  }
+
+  /**
+   * Prepares several signatures over distinct messages in one pairing context. The result can be
+   * mixed with the results of {@link #prepareBatchVerifySameMessage}.
+   */
+  private static BatchSemiAggregate prepareBatchVerifyChunk(
+      final int index,
+      final List<List<BLSPublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<BLSSignature> signatures) {
+    try {
+      return BLS.getBlsImpl()
+          .prepareBatchVerifyChunk(
+              index,
+              publicKeys.stream()
+                  .map(keys -> keys.stream().map(BLSPublicKey::getPublicKey).toList())
+                  .toList(),
+              messages,
+              signatures.stream().map(BLSSignature::getSignature).toList());
     } catch (BlsException e) {
       return new InvalidBatchSemiAggregate();
     }

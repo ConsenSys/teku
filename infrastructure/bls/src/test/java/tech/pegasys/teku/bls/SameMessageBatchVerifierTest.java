@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.bls.impl.BlsException;
 
 public class SameMessageBatchVerifierTest {
@@ -89,6 +91,36 @@ public class SameMessageBatchVerifierTest {
     assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, invalidSingleton, false))
         .isFalse();
     assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, invalidSingleton, true))
+        .isFalse();
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {7, 8, 9, 16, 17, 64})
+  void verifiesDistinctMessagesAcrossChunkBoundaries(final int size) {
+    final List<BLSKeyPair> keyPairs = new ArrayList<>();
+    final List<List<BLSPublicKey>> publicKeys = new ArrayList<>();
+    final List<Bytes> messages = new ArrayList<>();
+    final List<BLSSignature> signatures = new ArrayList<>();
+    for (int i = 0; i < size; i++) {
+      final BLSKeyPair keyPair = BLSTestUtil.randomKeyPair(300 + i);
+      final Bytes message = Bytes.wrap(("distinct message " + i).getBytes(UTF_8));
+      keyPairs.add(keyPair);
+      publicKeys.add(List.of(keyPair.getPublicKey()));
+      messages.add(message);
+      signatures.add(BLS.sign(keyPair.getSecretKey(), message));
+    }
+
+    assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, false))
+        .isTrue();
+    assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, true))
+        .isTrue();
+
+    final int last = size - 1;
+    signatures.set(last, BLS.sign(keyPairs.get(last).getSecretKey(), OTHER_MESSAGE));
+
+    assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, false))
+        .isFalse();
+    assertThat(SameMessageBatchVerifier.batchVerify(publicKeys, messages, signatures, true))
         .isFalse();
   }
 

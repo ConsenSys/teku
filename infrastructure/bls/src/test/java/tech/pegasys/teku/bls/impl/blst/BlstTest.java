@@ -23,6 +23,8 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import supranational.blst.P2;
 import tech.pegasys.teku.bls.BatchSemiAggregate;
 import tech.pegasys.teku.bls.impl.AbstractBLS12381Test;
@@ -274,6 +276,140 @@ public class BlstTest extends AbstractBLS12381Test {
     assertThat(bls.completeBatchVerify(List.of(sameMessageAggregate1, otherAggregate))).isTrue();
     assertThat(bls.completeBatchVerify(List.of(sameMessageAggregate2, invalidOtherAggregate)))
         .isFalse();
+  }
+
+  @Test
+  void prepareBatchVerifyChunkSucceedsForValidSignatures() {
+    final Chunk chunk = validChunk(5);
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), chunk.signatures());
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 2, 4})
+  void prepareBatchVerifyChunkFailsWhenAMemberIsInvalid(final int invalidPosition) {
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(5);
+    final List<Bytes> messages = distinctMessages(5);
+    final List<List<BlstPublicKey>> publicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> signatures =
+        IntStream.range(0, 5)
+            .mapToObj(
+                i ->
+                    BlstBLS12381.sign(
+                        secretKeys.get(i),
+                        i == invalidPosition
+                            ? Bytes32.fromHexString("0xdeadbeef")
+                            : messages.get(i)))
+            .toList();
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifyChunk(0, publicKeys, messages, signatures);
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {1, 7, 8, 9})
+  void prepareBatchVerifyChunkHandlesPartialAndFullChunks(final int size) {
+    final Chunk chunk = validChunk(size);
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), chunk.signatures());
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
+  }
+
+  @Test
+  void prepareBatchVerifyChunkIsInvalidForInfinityPublicKey() {
+    final Chunk chunk = validChunk(3);
+    final BlstPublicKey infinityKey = BlstSecretKey.fromBytes(Bytes32.ZERO).derivePublicKey();
+    assertThat(infinityKey.isInfinity()).isTrue();
+    final List<List<BlstPublicKey>> publicKeys =
+        List.of(chunk.publicKeys().get(0), List.of(infinityKey), chunk.publicKeys().get(2));
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifyChunk(0, publicKeys, chunk.messages(), chunk.signatures());
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
+  }
+
+  @Test
+  void prepareBatchVerifyChunkIsInvalidWhenEveryMemberIsInfinity() {
+    final Chunk chunk = validChunk(3);
+    final BlstPublicKey infinityKey = BlstSecretKey.fromBytes(Bytes32.ZERO).derivePublicKey();
+    assertThat(infinityKey.isInfinity()).isTrue();
+    final List<List<BlstPublicKey>> publicKeys =
+        List.of(List.of(infinityKey), List.of(infinityKey), List.of(infinityKey));
+
+    final BatchSemiAggregate semiAggregate =
+        bls.prepareBatchVerifyChunk(0, publicKeys, chunk.messages(), chunk.signatures());
+
+    assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
+  }
+
+  @Test
+  void prepareBatchVerifyChunkThrowsForSignatureNotInG2() {
+    final Chunk chunk = validChunk(3);
+    final List<BlstSignature> signatures =
+        List.of(chunk.signatures().get(0), notInG2(), chunk.signatures().get(2));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), signatures));
+  }
+
+  @Test
+  void prepareBatchVerifyChunkCanBeCompletedTogetherWithSameMessageGroups() {
+    final Bytes msg = Bytes32.fromHexString("abcdef");
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(3);
+    final List<List<BlstPublicKey>> groupPublicKeys =
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList();
+    final List<BlstSignature> groupSignatures =
+        secretKeys.stream().map(sk -> BlstBLS12381.sign(sk, msg)).toList();
+    final List<BlstSignature> invalidGroupSignatures =
+        List.of(
+            groupSignatures.get(0),
+            BlstBLS12381.sign(secretKeys.get(1), Bytes32.fromHexString("fedcba")),
+            groupSignatures.get(2));
+
+    // completeBatchVerify merges into the first semi-aggregate, so build one per call
+    final BatchSemiAggregate chunkAggregate1 = prepareChunk(validChunk(5));
+    final BatchSemiAggregate chunkAggregate2 = prepareChunk(validChunk(5));
+    final BatchSemiAggregate groupAggregate =
+        bls.prepareBatchVerifySameMessage(5, groupPublicKeys, msg, groupSignatures, false);
+    final BatchSemiAggregate invalidGroupAggregate =
+        bls.prepareBatchVerifySameMessage(5, groupPublicKeys, msg, invalidGroupSignatures, false);
+
+    assertThat(bls.completeBatchVerify(List.of(chunkAggregate1, groupAggregate))).isTrue();
+    assertThat(bls.completeBatchVerify(List.of(chunkAggregate2, invalidGroupAggregate))).isFalse();
+  }
+
+  private record Chunk(
+      List<List<BlstPublicKey>> publicKeys, List<Bytes> messages, List<BlstSignature> signatures) {}
+
+  private static Chunk validChunk(final int size) {
+    final List<BlstSecretKey> secretKeys = randomSecretKeys(size);
+    final List<Bytes> messages = distinctMessages(size);
+    return new Chunk(
+        secretKeys.stream().map(sk -> List.of(sk.derivePublicKey())).toList(),
+        messages,
+        IntStream.range(0, size)
+            .mapToObj(i -> BlstBLS12381.sign(secretKeys.get(i), messages.get(i)))
+            .toList());
+  }
+
+  private static BatchSemiAggregate prepareChunk(final Chunk chunk) {
+    return bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), chunk.signatures());
+  }
+
+  private static List<Bytes> distinctMessages(final int count) {
+    return IntStream.range(0, count)
+        .<Bytes>mapToObj(i -> Bytes32.fromHexString(Integer.toHexString(0x1000 + i)))
+        .toList();
   }
 
   private static List<BlstSecretKey> randomSecretKeys(final int count) {

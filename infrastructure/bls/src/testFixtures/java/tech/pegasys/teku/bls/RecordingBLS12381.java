@@ -41,7 +41,10 @@ public class RecordingBLS12381 implements BLS12381 {
     this.delegate = delegate;
   }
 
-  /** Thread name of every prepareBatchVerify, prepareBatchVerify2 and same-message prepare call. */
+  /**
+   * Thread name of every prepareBatchVerify, prepareBatchVerify2, same-message and chunk prepare
+   * call.
+   */
   public List<String> getPrepareThreadNames() {
     return List.copyOf(prepareThreadNames);
   }
@@ -130,6 +133,16 @@ public class RecordingBLS12381 implements BLS12381 {
     recordPrepareThread();
     sameMessageParallelArguments.add(parallel);
     return delegate.prepareBatchVerifySameMessage(index, publicKeys, message, signatures, parallel);
+  }
+
+  @Override
+  public BatchSemiAggregate prepareBatchVerifyChunk(
+      final int index,
+      final List<? extends List<? extends PublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<? extends Signature> signatures) {
+    recordPrepareThread();
+    return delegate.prepareBatchVerifyChunk(index, publicKeys, messages, signatures);
   }
 
   @Override

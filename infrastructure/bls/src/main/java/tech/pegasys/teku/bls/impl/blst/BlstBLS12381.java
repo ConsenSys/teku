@@ -208,6 +208,48 @@ public class BlstBLS12381 implements BLS12381 {
     return new BlstSemiAggregate(ctx);
   }
 
+  @Override
+  public BlstSemiAggregate prepareBatchVerifyChunk(
+      final int index,
+      final List<? extends List<? extends PublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<? extends Signature> signatures) {
+    checkArgument(
+        publicKeys.size() == messages.size() && publicKeys.size() == signatures.size(),
+        "Different collection sizes: %s public key lists, %s messages, %s signatures",
+        publicKeys.size(),
+        messages.size(),
+        signatures.size());
+    checkArgument(!signatures.isEmpty(), "No signatures to verify");
+
+    final Pairing ctx = new Pairing(true, ETH2_DST);
+    for (int i = 0; i < signatures.size(); i++) {
+      final BlstPublicKey aggrPubKey = aggregatePublicKeys(publicKeys.get(i));
+      if (aggrPubKey.isInfinity()) {
+        return BlstSemiAggregate.createInvalid();
+      }
+      final BlstSignature blstSignature = BlstSignature.fromSignature(signatures.get(i));
+      final BLST_ERROR ret =
+          ctx.mul_n_aggregate(
+              aggrPubKey.ecPoint,
+              blstSignature.ec2Point,
+              nextBatchRandomMultiplier(),
+              messages.get(i).toArray());
+
+      if (ret != BLST_ERROR.BLST_SUCCESS) {
+        if (ret == BLST_ERROR.BLST_PK_IS_INFINITY) {
+          return BlstSemiAggregate.createInvalid();
+        } else {
+          throw new BlsException("Error in Blst, error code: " + ret);
+        }
+      }
+    }
+
+    ctx.commit();
+
+    return new BlstSemiAggregate(ctx);
+  }
+
   /**
    * Running sum of (public key, signature) pairs, each pair scaled by the same fresh random
    * multiplier so that summing several pairs over the same message is still a sound randomised
