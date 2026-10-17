@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.config;
 
 import java.util.Objects;
 import java.util.Optional;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 
 public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements SpecConfigHeze {
@@ -25,6 +26,8 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
   private final int maxTransactionsBytesPerInclusionList;
   private final int maxSignedInclusionListSize;
   private final int inclusionListCommitteeSize;
+  private final int slotDurationMsHeze;
+  private final UInt64 minBlobDataRetentionMs;
 
   public SpecConfigHezeImpl(
       final SpecConfigGloas specConfig,
@@ -33,7 +36,9 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
       final int minSlotsForInclusionListsRequests,
       final int maxTransactionsBytesPerInclusionList,
       final int maxSignedInclusionListSize,
-      final int inclusionListCommitteeSize) {
+      final int inclusionListCommitteeSize,
+      final int slotDurationMsHeze,
+      final UInt64 minBlobDataRetentionMs) {
     super(specConfig);
     this.inclusionListDueBps = inclusionListDueBps;
     this.maxRequestInclusionList = maxRequestInclusionList;
@@ -41,6 +46,8 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
     this.maxTransactionsBytesPerInclusionList = maxTransactionsBytesPerInclusionList;
     this.maxSignedInclusionListSize = maxSignedInclusionListSize;
     this.inclusionListCommitteeSize = inclusionListCommitteeSize;
+    this.slotDurationMsHeze = slotDurationMsHeze;
+    this.minBlobDataRetentionMs = minBlobDataRetentionMs;
   }
 
   @Override
@@ -79,6 +86,16 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
   }
 
   @Override
+  public int getSlotDurationMsHeze() {
+    return slotDurationMsHeze;
+  }
+
+  @Override
+  public UInt64 getMinBlobDataRetentionMs() {
+    return minBlobDataRetentionMs;
+  }
+
+  @Override
   public Optional<SpecConfigHeze> toVersionHeze() {
     return Optional.of(this);
   }
@@ -97,7 +114,9 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
         && minSlotsForInclusionListsRequests == that.minSlotsForInclusionListsRequests
         && maxTransactionsBytesPerInclusionList == that.maxTransactionsBytesPerInclusionList
         && maxSignedInclusionListSize == that.maxSignedInclusionListSize
-        && inclusionListCommitteeSize == that.inclusionListCommitteeSize;
+        && inclusionListCommitteeSize == that.inclusionListCommitteeSize
+        && slotDurationMsHeze == that.slotDurationMsHeze
+        && Objects.equals(minBlobDataRetentionMs, that.minBlobDataRetentionMs);
   }
 
   @Override
@@ -109,6 +128,8 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
         minSlotsForInclusionListsRequests,
         maxTransactionsBytesPerInclusionList,
         maxSignedInclusionListSize,
-        inclusionListCommitteeSize);
+        inclusionListCommitteeSize,
+        slotDurationMsHeze,
+        minBlobDataRetentionMs);
   }
 }

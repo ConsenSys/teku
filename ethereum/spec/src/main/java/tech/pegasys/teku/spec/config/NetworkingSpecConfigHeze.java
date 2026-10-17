@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.config;
 
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+
 public interface NetworkingSpecConfigHeze extends NetworkingSpecConfigGloas {
 
   int getMaxRequestInclusionList();
@@ -22,4 +24,6 @@ public interface NetworkingSpecConfigHeze extends NetworkingSpecConfigGloas {
   int getMaxTransactionsBytesPerInclusionList();
 
   int getMaxSignedInclusionListSize();
+
+  UInt64 getMinBlobDataRetentionMs();
 }

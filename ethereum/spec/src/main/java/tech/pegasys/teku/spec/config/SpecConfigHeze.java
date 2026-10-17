@@ -30,6 +30,8 @@ public interface SpecConfigHeze extends SpecConfigGloas, NetworkingSpecConfigHez
 
   int getInclusionListCommitteeSize();
 
+  int getSlotDurationMsHeze();
+
   @Override
   default Optional<SpecConfigHeze> toVersionHeze() {
     return Optional.of(this);
