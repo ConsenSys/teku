@@ -1,0 +1,42 @@
+name: docker-scan
+
+# Nightly Trivy scan of the published develop images. Replaces the dockerScan job that ran on
+# CircleCI before CI moved to GitHub Actions.
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trivyScan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        jdk_version: [jdk25, jdk26]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Scan with trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: consensys/teku:develop-${{ matrix.jdk_version }}
+          severity: HIGH,CRITICAL
+          trivyignores: gradle/trivyignore.txt
+          exit-code: 1
+          format: sarif
+          output: trivy-results.sarif
+          limit-severities-for-sarif: true
+          version: v0.75.0
+      - name: Upload results to GitHub code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-${{ matrix.jdk_version }}
