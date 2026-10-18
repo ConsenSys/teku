@@ -1204,10 +1204,20 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       transitionValidatedStatus =
           SafeFuture.completedFuture(new PayloadValidationResult(payloadResult));
     }
+    // Store writes must happen on the fork choice thread. A failure to record IL satisfaction is
+    // logged separately so it can't stop the payload result being applied.
     transitionValidatedStatus
         .thenCompose(
             result ->
-                recordPayloadInclusionListSatisfaction(node, payloadResult, result)
+                forkChoiceExecutor
+                    .executeFuture(
+                        () -> recordPayloadInclusionListSatisfaction(node, payloadResult, result))
+                    .handleException(
+                        error ->
+                            LOG.error(
+                                "Failed to record inclusion list satisfaction for node {}",
+                                node,
+                                error))
                     .thenApply(__ -> result))
         .finishAsync(
             result -> {
@@ -1274,7 +1284,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
    * sync spec this only applies to the block whose payload transitions from NOT_VALIDATED to VALID.
    * The response is about the execution head, which is the head's own payload for a FULL head, but
    * the nearest FULL ancestor's payload for an EMPTY head. A payload that was already VALID had its
-   * satisfaction recorded when it was imported, which must not change.
+   * satisfaction recorded when it was imported, which must not change. Must be called on the fork
+   * choice thread.
    */
   private SafeFuture<Void> recordPayloadInclusionListSatisfaction(
       final ForkChoiceNode headNode,
@@ -1290,6 +1301,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       return SafeFuture.COMPLETE;
     }
 
+    forkChoiceExecutor.checkOnEventThread();
     final StoreTransaction transaction = recentChainData.startStoreTransaction();
     recordPayloadInclusionListSatisfaction(
         transaction, maybeOptimisticPayloadNode.get().blockRoot(), payloadStatus);

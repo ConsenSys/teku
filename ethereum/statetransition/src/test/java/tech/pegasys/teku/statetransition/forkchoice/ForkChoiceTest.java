@@ -2154,6 +2154,95 @@ class ForkChoiceTest {
     assertThat(recentChainData.getStore().satisfiesInclusionList(targetBlock.getRoot())).isTrue();
   }
 
+  @Test
+  void onForkChoiceUpdatedResult_shouldRecordInclusionListSatisfactionOnForkChoiceThread() {
+    final SignedBlockAndState targetBlock = setupHezeWithOptimisticPayloadAtSlotOne();
+    final RecentChainData recentChainDataSpy = spy(recentChainData);
+    doAnswer(
+            invocation -> {
+              eventThread.checkOnEventThread();
+              return invocation.callRealMethod();
+            })
+        .when(recentChainDataSpy)
+        .startStoreTransaction();
+    recentChainData = recentChainDataSpy;
+    recreateForkChoice(LateBlockReorgPreparationHandler.NOOP);
+
+    final ForkChoiceNode fullNode = ForkChoiceNode.createFull(targetBlock.getRoot());
+    // Completed from the test thread, as the EL response would be, rather than the fork choice
+    // thread
+    final SafeFuture<ForkChoiceUpdatedResult> forkChoiceUpdatedResult = new SafeFuture<>();
+    forkChoice.onForkChoiceUpdatedResult(
+        new ForkChoiceUpdatedResultNotification(
+            new ForkChoiceState(
+                fullNode,
+                targetBlock.getSlot(),
+                UInt64.ZERO,
+                Bytes32.ZERO,
+                Bytes32.ZERO,
+                Bytes32.ZERO,
+                false),
+            Optional.empty(),
+            false,
+            forkChoiceUpdatedResult));
+    forkChoiceUpdatedResult.complete(
+        new ForkChoiceUpdatedResult(
+            PayloadStatus.valid(Optional.empty(), Optional.empty(), Optional.of(false)),
+            Optional.empty()));
+
+    verify(recentChainDataSpy).startStoreTransaction();
+    assertThat(recentChainData.getStore().satisfiesInclusionList(targetBlock.getRoot())).isFalse();
+    assertThat(isOptimistic(fullNode)).isFalse();
+  }
+
+  @Test
+  void onForkChoiceUpdatedResult_shouldApplyPayloadResultWhenRecordingSatisfactionFails() {
+    final SignedBlockAndState targetBlock = setupHezeWithOptimisticPayloadAtSlotOne();
+    final StoreTransaction failingTransaction = mock(StoreTransaction.class);
+    when(failingTransaction.commit())
+        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("commit failed")));
+    final RecentChainData recentChainDataSpy = spy(recentChainData);
+    doReturn(failingTransaction).when(recentChainDataSpy).startStoreTransaction();
+    recentChainData = recentChainDataSpy;
+    recreateForkChoice(LateBlockReorgPreparationHandler.NOOP);
+
+    final ForkChoiceNode fullNode = ForkChoiceNode.createFull(targetBlock.getRoot());
+    assertThat(isOptimistic(fullNode)).isTrue();
+    notifyForkChoiceUpdatedResult(
+        fullNode,
+        targetBlock.getSlot(),
+        PayloadStatus.valid(Optional.empty(), Optional.empty(), Optional.of(false)));
+
+    verify(failingTransaction).putUnsatisfiedInclusionListBlock(targetBlock.getRoot());
+    // The forkchoiceUpdated result is still applied
+    assertThat(isOptimistic(fullNode)).isFalse();
+  }
+
+  /** Imports a Heze block at slot 1 whose payload stays optimistic. */
+  private SignedBlockAndState setupHezeWithOptimisticPayloadAtSlotOne() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalHeze(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    final SignedBlockAndState targetBlock = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(targetBlock);
+    setForkChoiceNotifierForkChoiceUpdatedResult(PayloadStatus.SYNCING);
+    executionLayer.setPayloadStatus(PayloadStatus.ACCEPTED);
+    importPayload(targetBlock);
+    assertThat(isOptimistic(ForkChoiceNode.createFull(targetBlock.getRoot()))).isTrue();
+    return targetBlock;
+  }
+
+  private boolean isOptimistic(final ForkChoiceNode node) {
+    return recentChainData
+        .getStore()
+        .getForkChoiceStrategy()
+        .getNodeData(node)
+        .orElseThrow()
+        .isOptimistic();
+  }
+
   private void notifyForkChoiceUpdatedResult(
       final ForkChoiceNode headNode, final UInt64 headSlot, final PayloadStatus payloadStatus) {
     forkChoice.onForkChoiceUpdatedResult(
