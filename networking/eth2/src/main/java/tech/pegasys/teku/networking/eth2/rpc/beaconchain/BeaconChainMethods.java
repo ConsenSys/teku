@@ -167,6 +167,8 @@ public class BeaconChainMethods {
     // Gloas
     executionPayloadEnvelopesByRoot.ifPresent(allMethods::add);
     executionPayloadEnvelopesByRange.ifPresent(allMethods::add);
+    // Heze
+    inclusionListByCommitteeIndices.ifPresent(allMethods::add);
   }
 
   public static BeaconChainMethods create(

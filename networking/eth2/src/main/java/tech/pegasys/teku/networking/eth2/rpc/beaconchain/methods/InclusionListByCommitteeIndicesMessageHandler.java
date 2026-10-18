@@ -31,8 +31,11 @@ import tech.pegasys.teku.networking.eth2.peers.RequestKey;
 import tech.pegasys.teku.networking.eth2.rpc.core.PeerRequiredLocalMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ResourceUnavailableException;
 import tech.pegasys.teku.networking.p2p.rpc.StreamClosedException;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.InclusionListByCommitteeRequestMessage;
@@ -71,8 +74,14 @@ public class InclusionListByCommitteeIndicesMessageHandler
   @Override
   public Optional<RpcException> validateRequest(
       final String protocolId, final InclusionListByCommitteeRequestMessage request) {
-    final SpecConfigHeze specConfigHeze =
-        SpecConfigHeze.required(spec.atSlot(request.getSlot()).getConfig());
+    final SpecVersion specVersion = spec.atSlot(request.getSlot());
+    if (specVersion.getMilestone().isLessThan(SpecMilestone.HEZE)) {
+      requestCounter.labels("pre_heze_slot").inc();
+      return Optional.of(
+          new ResourceUnavailableException(
+              "Inclusion lists are not available before the Heze fork"));
+    }
+    final SpecConfigHeze specConfigHeze = SpecConfigHeze.required(specVersion.getConfig());
 
     final int requestedCount = request.getCommitteeIndices().getAllSetBits().size();
     final int maxRequestInclusionList = specConfigHeze.getMaxRequestInclusionList();

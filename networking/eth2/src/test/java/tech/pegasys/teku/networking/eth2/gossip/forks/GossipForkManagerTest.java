@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -42,6 +43,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
@@ -273,6 +275,29 @@ class GossipForkManagerTest {
 
     verify(firstFork, never()).publishAttestation(attestation);
     verify(secondFork, never()).publishAttestation(attestation);
+  }
+
+  @Test
+  void shouldLogInclusionListTypeWhenNotPublishingInclusionList() {
+    final GossipForkSubscriptions firstFork = forkAtEpoch(0);
+    final GossipForkSubscriptions secondFork = forkAtEpoch(10);
+
+    final GossipForkManager manager = managerForForks(firstFork, secondFork);
+    manager.configureGossipForEpoch(UInt64.ZERO);
+
+    final SignedInclusionList inclusionList =
+        new DataStructureUtil(TestSpecFactory.createMinimalHeze()).randomSignedInclusionList();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(GossipForkManager.class)) {
+      manager.publishInclusionList(inclusionList);
+
+      assertThat(logCaptor.getWarnLogs())
+          .containsExactly(
+              "Not publishing inclusion list because no gossip subscriptions are active for slot "
+                  + inclusionList.getMessage().getSlot());
+    }
+    verify(firstFork, never()).publishSignedInclusionList(inclusionList);
+    verify(secondFork, never()).publishSignedInclusionList(inclusionList);
   }
 
   @Test

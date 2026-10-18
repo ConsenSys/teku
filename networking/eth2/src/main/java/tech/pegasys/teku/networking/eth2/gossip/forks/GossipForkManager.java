@@ -297,7 +297,7 @@ public class GossipForkManager {
     publishMessage(
         signedInclusionList.getMessage().getSlot(),
         signedInclusionList,
-        "attestation",
+        "inclusion list",
         GossipForkSubscriptions::publishSignedInclusionList);
   }
 

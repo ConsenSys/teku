@@ -126,7 +126,7 @@ public class StoreConfig {
 
     private int epochStateCacheSize = DEFAULT_EPOCH_STATE_CACHE_SIZE;
     private int blockCacheSize = DEFAULT_BLOCK_CACHE_SIZE;
-    private int inclusionListCacheSize = DEFAULT_BLOCK_CACHE_SIZE;
+    private int inclusionListCacheSize = DEFAULT_INCLUSION_LIST_CACHE_SIZE;
     private int checkpointStateCacheSize = DEFAULT_CHECKPOINT_STATE_CACHE_SIZE;
     private int hotStatePersistenceFrequencyInEpochs =
         DEFAULT_HOT_STATE_PERSISTENCE_FREQUENCY_IN_EPOCHS;

@@ -34,6 +34,7 @@ import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.MetadataMessage
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.StatusMessageFactory;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcRequestDecoder;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.RpcEncoding;
+import tech.pegasys.teku.networking.p2p.rpc.RpcMethod;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.status.StatusMessage;
@@ -213,6 +214,7 @@ public class BeaconChainMethodsTest {
                 assertThat(method.getIds())
                     .containsExactly(
                         "/eth2/beacon_chain/req/inclusion_lists_by_indices/1/ssz_snappy"));
+    assertThat(methods.all()).contains(methods.inclusionListByCommitteeIndices().orElseThrow());
   }
 
   @Test
@@ -220,6 +222,9 @@ public class BeaconChainMethodsTest {
     final BeaconChainMethods methods = getMethods(TestSpecFactory.createMinimalGloas());
 
     assertThat(methods.inclusionListByCommitteeIndices()).isEmpty();
+    assertThat(methods.all())
+        .flatMap(RpcMethod::getIds)
+        .noneMatch(id -> id.contains("inclusion_lists_by_indices"));
   }
 
   private BeaconChainMethods getMethods() {

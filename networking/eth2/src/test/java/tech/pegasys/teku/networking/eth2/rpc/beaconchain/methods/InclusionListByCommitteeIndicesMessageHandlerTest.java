@@ -22,6 +22,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
+import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.RESOURCE_UNAVAILABLE;
 
 import com.google.common.base.Throwables;
 import java.util.List;
@@ -41,6 +42,7 @@ import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.peers.RequestKey;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.BeaconChainMethodIds;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.RpcEncoding;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -168,11 +170,45 @@ class InclusionListByCommitteeIndicesMessageHandlerTest {
     assertThat(handler.validateRequest(protocolId, request(allPositions))).isEmpty();
   }
 
+  @Test
+  void validateRequest_shouldRejectRequestForPreHezeSlot() {
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithHezeForkEpoch(UInt64.ONE);
+    final InclusionListByCommitteeIndicesMessageHandler transitionHandler =
+        new InclusionListByCommitteeIndicesMessageHandler(
+            transitionSpec, metricsSystem, inclusionListManager);
+    final UInt64 lastPreHezeSlot =
+        transitionSpec.computeStartSlotAtEpoch(UInt64.ONE).minusMinZero(1);
+
+    final Optional<RpcException> result =
+        transitionHandler.validateRequest(protocolId, request(lastPreHezeSlot, 0));
+
+    assertThat(result)
+        .hasValueSatisfying(
+            error -> assertThat(error.getResponseCode()).isEqualTo(RESOURCE_UNAVAILABLE));
+    assertThat(getRequestCounterValue("pre_heze_slot")).isOne();
+  }
+
+  @Test
+  void validateRequest_shouldAcceptRequestForFirstHezeSlot() {
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithHezeForkEpoch(UInt64.ONE);
+    final InclusionListByCommitteeIndicesMessageHandler transitionHandler =
+        new InclusionListByCommitteeIndicesMessageHandler(
+            transitionSpec, metricsSystem, inclusionListManager);
+    final UInt64 firstHezeSlot = transitionSpec.computeStartSlotAtEpoch(UInt64.ONE);
+
+    assertThat(transitionHandler.validateRequest(protocolId, request(firstHezeSlot, 0))).isEmpty();
+  }
+
   private InclusionListByCommitteeRequestMessage request(final int... positions) {
+    return request(SLOT, positions);
+  }
+
+  private InclusionListByCommitteeRequestMessage request(
+      final UInt64 slot, final int... positions) {
     final SszBitvector committeeIndices =
         SszBitvectorSchema.create(specConfig.getInclusionListCommitteeSize()).ofBits(positions);
     return new InclusionListByCommitteeRequestMessage(
-        SLOT, dependentRoot, committeeIndices, specConfig);
+        slot, dependentRoot, committeeIndices, specConfig);
   }
 
   private SignedInclusionList signedInclusionList(final UInt64 validatorIndex) {
