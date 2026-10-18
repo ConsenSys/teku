@@ -22,6 +22,7 @@ import tech.pegasys.teku.ethereum.executionclient.ExecutionEngineClient;
 import tech.pegasys.teku.ethereum.executionclient.response.ResponseUnwrapper;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteListSchema;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
@@ -50,27 +51,25 @@ public class EngineGetInclusionListV1 extends AbstractEngineJsonRpcMethod<List<T
   @Override
   public SafeFuture<List<Transaction>> execute(final JsonRpcRequestParams params) {
     final Bytes32 parentHash = params.getRequiredParameter(0, Bytes32.class);
+    final UInt64 slot = params.getRequiredParameter(1, UInt64.class);
 
-    LOG.trace("Calling {}(parentHash={})", getVersionedName(), parentHash);
+    LOG.trace("Calling {}(parentHash={}, slot={})", getVersionedName(), parentHash, slot);
+
+    final SszByteListSchema<Transaction> transactionSchema =
+        SchemaDefinitionsHeze.required(spec.atSlot(slot).getSchemaDefinitions())
+            .getInclusionListSchema()
+            .getTransactionSchema();
 
     return executionEngineClient
         .getInclusionListV1(parentHash)
         .thenApply(ResponseUnwrapper::unwrapExecutionClientResponseOrThrow)
         .thenApply(
-            response -> {
-              // TODO EIP7805 this is not used since using the method resolver to call
-              // getInclusionListV1. We should find a better way to get the slot and get the spec at
-              // that slot instead of using the genesis spec config/schema definitions
-              final SszByteListSchema<Transaction> transactionSchema =
-                  SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions())
-                      .getInclusionListSchema()
-                      .getTransactionSchema();
-              return response.stream()
-                  .map(
-                      inclusionListTransactionV1 ->
-                          transactionSchema.fromBytes(
-                              Bytes.fromHexString(inclusionListTransactionV1)))
-                  .toList();
-            });
+            response ->
+                response.stream()
+                    .map(
+                        inclusionListTransactionV1 ->
+                            transactionSchema.fromBytes(
+                                Bytes.fromHexString(inclusionListTransactionV1)))
+                    .toList());
   }
 }

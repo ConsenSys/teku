@@ -14,10 +14,15 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SLOT;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseStringFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
@@ -26,13 +31,16 @@ import com.google.common.io.Resources;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.AssertionsForClassTypes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
 import tech.pegasys.teku.infrastructure.http.HttpStatusCodes;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 
@@ -53,6 +61,35 @@ class GetInclusionListTest extends AbstractMigratedBeaconHandlerWithChainDataPro
     Assertions.assertThat(request.getResponseCode())
         .isEqualTo(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
     Assertions.assertThat(request.getResponseBody()).isInstanceOf(HttpErrorResponse.class);
+  }
+
+  @Test
+  void shouldReturnInclusionListForHezeSlot() throws JsonProcessingException {
+    final List<Transaction> transactions =
+        List.of(dataStructureUtil.randomExecutionPayloadTransaction());
+    when(validatorDataProvider.isStoreAvailable()).thenReturn(true);
+    when(validatorDataProvider.getMilestoneAtSlot(UInt64.ONE)).thenReturn(SpecMilestone.HEZE);
+    when(validatorDataProvider.getInclusionList(UInt64.ONE))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(transactions)));
+    request.setQueryParameter(SLOT, "1");
+
+    handler.handleRequest(request);
+
+    Assertions.assertThat(request.getResponseCode()).isEqualTo(SC_OK);
+    Assertions.assertThat(request.getResponseBody()).isEqualTo(transactions);
+  }
+
+  @Test
+  void shouldReturnBadRequestForPreHezeSlot() throws JsonProcessingException {
+    when(validatorDataProvider.isStoreAvailable()).thenReturn(true);
+    when(validatorDataProvider.getMilestoneAtSlot(UInt64.ONE)).thenReturn(SpecMilestone.GLOAS);
+    request.setQueryParameter(SLOT, "1");
+
+    handler.handleRequest(request);
+
+    Assertions.assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    Assertions.assertThat(request.getResponseBody()).isInstanceOf(HttpErrorResponse.class);
+    verify(validatorDataProvider, never()).getInclusionList(any());
   }
 
   @Test

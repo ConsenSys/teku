@@ -19,11 +19,13 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionListSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 
 public class InclusionListFactory {
@@ -44,12 +46,13 @@ public class InclusionListFactory {
   @SuppressWarnings("FutureReturnValueIgnored")
   public SafeFuture<Optional<InclusionList>> createInclusionList(
       final UInt64 slot, final UInt64 validatorIndex) {
+    final Optional<SchemaDefinitionsHeze> maybeSchemaDefinitions =
+        spec.atSlot(slot).getSchemaDefinitions().toVersionHeze();
+    if (maybeSchemaDefinitions.isEmpty()) {
+      return preHezeSlotFailure(slot);
+    }
     final InclusionListSchema inclusionListSchema =
-        spec.atSlot(slot)
-            .getSchemaDefinitions()
-            .toVersionHeze()
-            .orElseThrow()
-            .getInclusionListSchema();
+        maybeSchemaDefinitions.get().getInclusionListSchema();
     return combinedChainDataClient
         .getBestState()
         .orElseGet(
@@ -73,7 +76,9 @@ public class InclusionListFactory {
 
   @SuppressWarnings("FutureReturnValueIgnored")
   public SafeFuture<Optional<List<Transaction>>> getInclusionList(final UInt64 slot) {
-
+    if (spec.atSlot(slot).getMilestone().isLessThan(SpecMilestone.HEZE)) {
+      return preHezeSlotFailure(slot);
+    }
     return combinedChainDataClient
         .getBestState()
         .orElseGet(
@@ -88,5 +93,11 @@ public class InclusionListFactory {
                   .engineGetInclusionList(parentHash, slot)
                   .thenApply(Optional::ofNullable);
             });
+  }
+
+  private static <T> SafeFuture<T> preHezeSlotFailure(final UInt64 slot) {
+    return SafeFuture.failedFuture(
+        new IllegalArgumentException(
+            "Inclusion lists are not available for slot " + slot + " before the Heze fork"));
   }
 }

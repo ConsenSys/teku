@@ -14,6 +14,7 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SLOT_PARAMETER;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SERVICE_UNAVAILABLE;
@@ -75,6 +76,11 @@ public class GetInclusionList extends RestApiEndpoint {
     }
 
     final UInt64 slot = request.getQueryParameter(SLOT_PARAMETER);
+    if (validatorDataProvider.getMilestoneAtSlot(slot).isLessThan(SpecMilestone.HEZE)) {
+      request.respondError(
+          SC_BAD_REQUEST, "Cannot produce an inclusion list for slots prior to the heze fork.");
+      return;
+    }
 
     final SafeFuture<Optional<List<Transaction>>> future =
         validatorDataProvider.getInclusionList(slot);

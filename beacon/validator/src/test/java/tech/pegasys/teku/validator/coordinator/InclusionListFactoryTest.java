@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.coordinator;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
@@ -78,5 +79,31 @@ class InclusionListFactoryTest {
         .isCompletedWithValue(Optional.of(expectedInclusionList));
 
     verify(executionLayerChannel).engineGetInclusionList(blockHash, slot);
+  }
+
+  @Test
+  void createInclusionListShouldRejectPreHezeSlot() {
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithHezeForkEpoch(UInt64.ONE);
+    final InclusionListFactory factory =
+        new InclusionListFactory(executionLayerChannel, combinedChainDataClient, transitionSpec);
+    final UInt64 preHezeSlot = transitionSpec.computeStartSlotAtEpoch(UInt64.ONE).minus(1);
+
+    assertThatSafeFuture(factory.createInclusionList(preHezeSlot, UInt64.ZERO))
+        .isCompletedExceptionallyWith(IllegalArgumentException.class);
+
+    verifyNoInteractions(combinedChainDataClient, executionLayerChannel);
+  }
+
+  @Test
+  void getInclusionListShouldRejectPreHezeSlot() {
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithHezeForkEpoch(UInt64.ONE);
+    final InclusionListFactory factory =
+        new InclusionListFactory(executionLayerChannel, combinedChainDataClient, transitionSpec);
+    final UInt64 preHezeSlot = transitionSpec.computeStartSlotAtEpoch(UInt64.ONE).minus(1);
+
+    assertThatSafeFuture(factory.getInclusionList(preHezeSlot))
+        .isCompletedExceptionallyWith(IllegalArgumentException.class);
+
+    verifyNoInteractions(combinedChainDataClient, executionLayerChannel);
   }
 }

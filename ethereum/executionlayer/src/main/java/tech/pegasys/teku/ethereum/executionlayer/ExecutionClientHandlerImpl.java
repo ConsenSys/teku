@@ -15,7 +15,6 @@ package tech.pegasys.teku.ethereum.executionlayer;
 
 import java.util.List;
 import java.util.Optional;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.executionclient.ExecutionEngineClient;
 import tech.pegasys.teku.ethereum.executionclient.methods.EngineApiMethod;
@@ -26,7 +25,6 @@ import tech.pegasys.teku.ethereum.executionclient.schema.ExecutionPayloadBodyV2;
 import tech.pegasys.teku.ethereum.executionclient.schema.WithdrawalV1;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.collections.impl.SszByteListImpl;
-import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteListSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSchema;
@@ -47,9 +45,12 @@ import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.logic.versions.deneb.types.VersionedHash;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
 public class ExecutionClientHandlerImpl implements ExecutionClientHandler {
+
+  @SuppressWarnings("unchecked")
+  private static final Class<List<Transaction>> TRANSACTION_LIST_TYPE =
+      (Class<List<Transaction>>) (Class<?>) List.class;
 
   private final Spec spec;
   private final ExecutionEngineClient executionEngineClient;
@@ -224,21 +225,16 @@ public class ExecutionClientHandlerImpl implements ExecutionClientHandler {
   @Override
   public SafeFuture<List<Transaction>> engineGetInclusionList(
       final Bytes32 parentHash, final UInt64 slot) {
-    return executionEngineClient
-        .getInclusionListV1(parentHash)
-        .thenApply(ResponseUnwrapper::unwrapExecutionClientResponseOrThrow)
-        .thenApply(
-            response -> {
-              final SszByteListSchema<Transaction> transactionSchema =
-                  SchemaDefinitionsHeze.required(spec.atSlot(slot).getSchemaDefinitions())
-                      .getInclusionListSchema()
-                      .getTransactionSchema();
-              return response.stream()
-                  .map(
-                      inclusionListTransactionV1 ->
-                          transactionSchema.fromBytes(
-                              Bytes.fromHexString(inclusionListTransactionV1)))
-                  .toList();
-            });
+    final JsonRpcRequestParams params =
+        new JsonRpcRequestParams.Builder().add(parentHash).add(slot).build();
+
+    return SafeFuture.of(
+        () ->
+            engineMethodsResolver
+                .getMethod(
+                    EngineApiMethod.ENGINE_GET_INCLUSION_LIST,
+                    () -> spec.atSlot(slot).getMilestone(),
+                    TRANSACTION_LIST_TYPE)
+                .execute(params));
   }
 }
