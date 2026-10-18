@@ -798,6 +798,18 @@ public class ForkChoiceTestExecutor implements TestExecutor {
             assertThat(recentChainData.getBestBlockRoot())
                 .describedAs("best block root")
                 .contains(expectedRoot);
+            // Post-Gloas the head is a (root, payload_status) fork choice node
+            if (expectedHead.containsKey("payload_status")) {
+              final int expectedPayloadStatus =
+                  Integer.parseInt(expectedHead.get("payload_status").toString());
+              assertThat(
+                      recentChainData
+                          .getChainHead()
+                          .map(ChainHead::getPayloadStatus)
+                          .map(ForkChoicePayloadStatus::getValue))
+                  .describedAs("head payload_status")
+                  .contains(expectedPayloadStatus);
+            }
           }
 
           case "time" -> {
@@ -880,15 +892,6 @@ public class ForkChoiceTestExecutor implements TestExecutor {
               UInt64 actualWeight = chainHeadRootsAndWeights.get(root);
               assertThat(actualWeight).describedAs("block %s's weight", root).isEqualTo(weight);
             }
-          }
-
-          case "head_payload_status" -> {
-            final int expectedValue = ((Number) checks.get(checkType)).intValue();
-            final ForkChoicePayloadStatus headStatus =
-                recentChainData.getChainHead().map(ChainHead::getPayloadStatus).orElseThrow();
-            assertThat(headStatus.getValue())
-                .describedAs("head_payload_status")
-                .isEqualTo(expectedValue);
           }
 
           case "payload_timeliness_vote" ->

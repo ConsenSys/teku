@@ -14,6 +14,7 @@
 package tech.pegasys.teku.infrastructure.logging;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -44,13 +45,15 @@ public class P2PLogger {
   }
 
   public void onGossipRejected(
-      final String topic, final Bytes decodedMessage, final Optional<String> description) {
+      final String topic,
+      final Supplier<Bytes> decodedMessage,
+      final Optional<String> description) {
     if (isIncludeP2pWarnings) {
       log.warn(
           "Rejecting gossip message on topic {}, reason: {}, decoded message: {}",
           topic,
           description.orElse("failed validation"),
-          decodedMessage);
+          decodedMessage.get());
     }
   }
 

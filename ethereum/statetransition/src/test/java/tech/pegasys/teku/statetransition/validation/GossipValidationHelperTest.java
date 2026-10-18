@@ -147,6 +147,28 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void getMaxCurrentSlot_shouldAllowForClockDisparity() {
+    storageSystem.chainUpdater().setCurrentSlot(UInt64.ONE);
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.ONE);
+
+    final UInt64 slot2TimeMillis =
+        spec.computeTimeMillisAtSlot(
+            UInt64.valueOf(2),
+            secondsToMillis(
+                recentChainData.getBestState().orElseThrow().getImmediately().getGenesisTime()));
+
+    final UInt64 notYetInsideTolerance =
+        slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis()).decrement();
+    storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.ONE);
+
+    final UInt64 insideTolerance =
+        slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
+    storageSystem.chainUpdater().setTimeMillis(insideTolerance);
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.valueOf(2));
+  }
+
+  @TestTemplate
   void isWithinProposerLookahead_shouldComputeCorrectly() {
     final UInt64 proposalSlot = UInt64.valueOf(100);
     final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();

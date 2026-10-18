@@ -30,8 +30,10 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -70,6 +72,7 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
@@ -1430,6 +1433,98 @@ public class KvStoreDatabase implements Database {
         "Data column sidecars pruning completed in {} ms", System.currentTimeMillis() - startTime);
   }
 
+  @Override
+  public void archiveSidecarsProofs(final UInt64 startSlot, final UInt64 tillSlotInclusive) {
+    if (getFirstDataColumnSidecarSlot().isEmpty()) {
+      return;
+    }
+    // Extension columns (indices >= NUMBER_OF_COLUMNS / 2) are the reconstructable half whose
+    // proofs we retain while dropping the columns themselves.
+    final int numberOfColumns =
+        spec.getNumberOfDataColumns()
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Cannot archive data column sidecar proofs before the Fulu milestone"));
+    final int halfColumns = numberOfColumns / 2;
+    try (final Stream<DataColumnSlotAndIdentifier> dataColumnSidecars =
+        streamDataColumnIdentifiers(startSlot, tillSlotInclusive)) {
+
+      int archivedSlots = 0;
+
+      final NavigableMap<UInt64, List<DataColumnSlotAndIdentifier>> archiveMap =
+          dataColumnSidecars.collect(
+              Collectors.groupingBy(
+                  DataColumnSlotAndIdentifier::slot, TreeMap::new, Collectors.toList()));
+
+      if (!archiveMap.isEmpty()) {
+        LOG.debug(
+            "Archiving data column sidecars to proofs from slots {} to {}",
+            archiveMap.firstKey(),
+            archiveMap.lastKey());
+        try (final FinalizedUpdater updater = finalizedUpdater()) {
+          for (final UInt64 slot : archiveMap.keySet()) {
+            // The canonical sidecar table may also hold columns of a never-imported block at this
+            // slot, so columns are grouped by block root and only a block with every column is
+            // archived: first-half columns are required for reconstruction and columns of
+            // different blocks must never be mixed. Proofs are stored per slot, so the slot is
+            // skipped unless exactly one block is complete.
+            final List<List<DataColumnSlotAndIdentifier>> completeBlocks =
+                archiveMap.get(slot).stream()
+                    .collect(Collectors.groupingBy(DataColumnSlotAndIdentifier::blockRoot))
+                    .values()
+                    .stream()
+                    .filter(keys -> keys.size() == numberOfColumns)
+                    .toList();
+            if (completeBlocks.size() != 1) {
+              LOG.trace(
+                  "Skipping archival for slot {}: {} blocks have all {} columns",
+                  slot,
+                  completeBlocks.size(),
+                  numberOfColumns);
+              continue;
+            }
+            final List<DataColumnSlotAndIdentifier> extensionKeys =
+                completeBlocks.getFirst().stream()
+                    .filter(id -> id.columnIndex().isGreaterThanOrEqualTo(halfColumns))
+                    .sorted()
+                    .toList();
+
+            final List<Optional<List<KZGProof>>> maybeProofs =
+                extensionKeys.stream()
+                    .map(
+                        key ->
+                            dao.getSidecar(key)
+                                .map(
+                                    sidecar ->
+                                        spec
+                                            .deserializeSidecar(sidecar, slot)
+                                            .getKzgProofs()
+                                            .stream()
+                                            .map(SszKZGProof::getKZGProof)
+                                            .toList()))
+                    .toList();
+            if (!maybeProofs.stream().allMatch(Optional::isPresent)) {
+              LOG.trace("Skipping archival for slot {}: extension columns could not be read", slot);
+              continue;
+            }
+
+            updater.addDataColumnSidecarsProofs(
+                slot, maybeProofs.stream().map(Optional::orElseThrow).toList());
+            extensionKeys.forEach(updater::removeSidecar);
+            ++archivedSlots;
+            LOG.trace(
+                "Pruned {} extension data column sidecars, keeping their proofs, at slot {}",
+                extensionKeys.size(),
+                slot);
+          }
+          updater.commit();
+        }
+        LOG.debug("Archived data column sidecars to proofs across {} slots", archivedSlots);
+      }
+    }
+  }
+
   /**
    * Prunes data column sidecars oldest-first: each run removes the oldest (up to) {@code
    * pruneSlotLimit} distinct populated slots at or before the cutoff, in a single committed
@@ -1489,6 +1584,14 @@ public class KvStoreDatabase implements Database {
       // supported slot.
       if (sidecarType == DataColumnSidecarType.CANONICAL) {
         updater.setLastDataColumnSidecarPrunedSlot(toPrune.keys().getLast().slot());
+        final List<UInt64> prunedSlots =
+            toPrune.keys().stream().map(DataColumnSlotAndIdentifier::slot).distinct().toList();
+        LOG.debug(
+            "Removing any archived data column sidecar proofs for {} pruned canonical slots ({}..{})",
+            prunedSlots.size(),
+            prunedSlots.getFirst(),
+            prunedSlots.getLast());
+        prunedSlots.forEach(updater::removeDataColumnSidecarsProofs);
       }
       updater.commit();
     }

@@ -110,10 +110,11 @@ public class GenesisGenerator {
       final UInt64 depositCount = UInt64.valueOf(depositDataList.size() + deposits.size());
       state.setEth1Data(new Eth1Data(Bytes32.ZERO, depositCount, eth1BlockHash));
       if (genesisSpec.getMilestone().isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
-        // Fulu no longer processes Eth1 bridge deposits, so the bridge ends with the genesis
-        // deposits. This is what the spec's test genesis does, and upgrade_to_heze requires it.
+        // Fulu removed the Eth1 deposit bridge (consensus-specs #4704), so genesis starts deposit
+        // requests right after the genesis deposits
         MutableBeaconStateElectra.required(state).setDepositRequestsStartIndex(depositCount);
-      } else if (genesisSpec.getMilestone().isGreaterThanOrEqualTo(SpecMilestone.ELECTRA)) {
+      } else if (genesisSpec.getMilestone() == SpecMilestone.ELECTRA) {
+        // Electra genesis leaves the index unset until the first deposit request sets it (EIP-6110)
         MutableBeaconStateElectra.required(state)
             .setDepositRequestsStartIndex(UNSET_DEPOSIT_REQUESTS_START_INDEX);
       }

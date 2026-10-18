@@ -78,10 +78,13 @@ public class GossipValidationHelper {
   }
 
   public boolean isSlotFromFuture(final UInt64 slot) {
+    return slot.isGreaterThan(getMaxCurrentSlot());
+  }
+
+  /** Returns the current slot with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance. */
+  public UInt64 getMaxCurrentSlot() {
     final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
-    final UInt64 maxCurrSlot =
-        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
-    return slot.isGreaterThan(maxCurrSlot);
+    return spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
   }
 
   /**
@@ -106,10 +109,7 @@ public class GossipValidationHelper {
   }
 
   public boolean isEpochFromFuture(final UInt64 epoch) {
-    final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
-    final UInt64 maxCurrentSlot =
-        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
-    return epoch.isGreaterThan(spec.computeEpochAtSlot(maxCurrentSlot));
+    return epoch.isGreaterThan(spec.computeEpochAtSlot(getMaxCurrentSlot()));
   }
 
   public boolean hasSlotStarted(final UInt64 slot) {
