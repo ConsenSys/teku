@@ -130,11 +130,6 @@ public class ValidatorTimingActions implements ValidatorTimingChannel {
   }
 
   @Override
-  public void onInclusionListDue(final UInt64 slot) {
-    delegates.forEach(delegates -> delegates.onInclusionListDue(slot));
-  }
-
-  @Override
   public void onAttesterSlashing(final AttesterSlashing attesterSlashing) {
     delegates.forEach(delegates -> delegates.onAttesterSlashing(attesterSlashing));
     maybeValidatorSlashedAction.ifPresent(

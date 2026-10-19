@@ -61,7 +61,6 @@ public abstract class BlockProcessorTest extends ProcessorTestHelper {
             .updated(
                 state -> {
                   state.getValidators().get(1).withSlashed(true);
-                  // TODO EIP7805
                   if (spec.getGenesisSpec()
                       .getMilestone()
                       .isGreaterThanOrEqualTo(SpecMilestone.FULU)) {

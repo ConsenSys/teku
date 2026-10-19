@@ -130,7 +130,6 @@ public class InclusionListManager implements SlotEventsChannel {
         });
   }
 
-  // TODO EIP7805 we could use different inclusion list pools (pending, future)
   public SafeFuture<InclusionListImportResult> onInclusionList(
       final SignedInclusionList signedInclusionList) {
     return forkChoice

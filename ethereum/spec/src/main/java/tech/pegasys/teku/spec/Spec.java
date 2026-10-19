@@ -663,10 +663,6 @@ public class Spec {
     return atSlot(slot).miscHelpers().computeSigningRoot(slot, domain);
   }
 
-  public Bytes computeSigningRoot(final InclusionList inclusionList, final Bytes32 domain) {
-    return atSlot(inclusionList.getSlot()).miscHelpers().computeSigningRoot(inclusionList, domain);
-  }
-
   public Bytes computeBuilderApplicationSigningRoot(final UInt64 slot, final Merkleizable object) {
     final MiscHelpers miscHelpers = atSlot(slot).miscHelpers();
     return miscHelpers.computeSigningRoot(
