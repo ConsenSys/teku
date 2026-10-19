@@ -1593,7 +1593,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
       final PayloadAttestationMessageGossipValidator validator =
           new PayloadAttestationMessageGossipValidator(
-              spec, gossipValidationHelper, invalidBlockRoots);
+              spec, gossipValidationHelper, signatureVerificationService, invalidBlockRoots);
       pendingPayloadAttestations =
           poolFactory.createPendingPoolForPayloadAttestations(
               spec, beaconConfig.eth2NetworkConfig().getPendingPayloadAttestationsMaxQueue());
