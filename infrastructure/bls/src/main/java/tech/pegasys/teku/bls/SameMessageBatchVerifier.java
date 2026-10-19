@@ -85,7 +85,6 @@ public final class SameMessageBatchVerifier {
           work.add(
               () ->
                   prepareBatchVerifySameMessage(
-                      firstIndex,
                       group.stream().map(publicKeys::get).toList(),
                       messages.get(firstIndex),
                       group.stream().map(signatures::get).toList(),
@@ -96,7 +95,6 @@ public final class SameMessageBatchVerifier {
         work.add(
             () ->
                 prepareBatchVerifyChunk(
-                    chunk.getFirst(),
                     chunk.stream().map(publicKeys::get).toList(),
                     chunk.stream().map(messages::get).toList(),
                     chunk.stream().map(signatures::get).toList()));
@@ -119,7 +117,6 @@ public final class SameMessageBatchVerifier {
    * BLSSignature)}.
    */
   private static BatchSemiAggregate prepareBatchVerifySameMessage(
-      final int index,
       final List<List<BLSPublicKey>> publicKeys,
       final Bytes message,
       final List<BLSSignature> signatures,
@@ -127,7 +124,6 @@ public final class SameMessageBatchVerifier {
     try {
       return BLS.getBlsImpl()
           .prepareBatchVerifySameMessage(
-              index,
               publicKeys.stream()
                   .map(keys -> keys.stream().map(BLSPublicKey::getPublicKey).toList())
                   .toList(),
@@ -144,14 +140,12 @@ public final class SameMessageBatchVerifier {
    * mixed with the results of {@link #prepareBatchVerifySameMessage}.
    */
   private static BatchSemiAggregate prepareBatchVerifyChunk(
-      final int index,
       final List<List<BLSPublicKey>> publicKeys,
       final List<Bytes> messages,
       final List<BLSSignature> signatures) {
     try {
       return BLS.getBlsImpl()
           .prepareBatchVerifyChunk(
-              index,
               publicKeys.stream()
                   .map(keys -> keys.stream().map(BLSPublicKey::getPublicKey).toList())
                   .toList(),

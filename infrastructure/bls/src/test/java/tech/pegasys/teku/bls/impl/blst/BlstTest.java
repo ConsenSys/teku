@@ -117,7 +117,7 @@ public class BlstTest extends AbstractBLS12381Test {
         secretKeys.stream().map(sk -> BlstBLS12381.sign(sk, msg)).toList();
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, false);
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
   }
@@ -132,7 +132,7 @@ public class BlstTest extends AbstractBLS12381Test {
         secretKeys.stream().map(sk -> BlstBLS12381.sign(sk, msg)).toList();
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, true);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, true);
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
   }
@@ -152,7 +152,7 @@ public class BlstTest extends AbstractBLS12381Test {
             BlstBLS12381.sign(secretKeys.get(3), msg));
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, false);
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
   }
@@ -177,7 +177,7 @@ public class BlstTest extends AbstractBLS12381Test {
         .isEqualTo(BlstSignature.aggregate(List.of(sig1, sig2)).toBytesCompressed());
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, List.of(tampered1, tampered2), false);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, List.of(tampered1, tampered2), false);
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
   }
@@ -193,7 +193,7 @@ public class BlstTest extends AbstractBLS12381Test {
 
     assertThrows(
         BlsException.class,
-        () -> bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false));
+        () -> bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, false));
   }
 
   @Test
@@ -206,7 +206,6 @@ public class BlstTest extends AbstractBLS12381Test {
 
     final BatchSemiAggregate semiAggregate =
         bls.prepareBatchVerifySameMessage(
-            0,
             List.of(List.of(secretKey.derivePublicKey()), List.of(infinityKey)),
             msg,
             List.of(signature, signature),
@@ -241,7 +240,7 @@ public class BlstTest extends AbstractBLS12381Test {
                     BlstBLS12381.sign(secretKeys.get(5), msg))));
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, false);
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
   }
@@ -258,9 +257,9 @@ public class BlstTest extends AbstractBLS12381Test {
 
     // completeBatchVerify merges into the first semi-aggregate, so build one per call
     final BatchSemiAggregate sameMessageAggregate1 =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, false);
     final BatchSemiAggregate sameMessageAggregate2 =
-        bls.prepareBatchVerifySameMessage(0, publicKeys, msg, signatures, false);
+        bls.prepareBatchVerifySameMessage(publicKeys, msg, signatures, false);
     final BatchSemiAggregate otherAggregate =
         bls.prepareBatchVerify(
             3,
@@ -284,7 +283,7 @@ public class BlstTest extends AbstractBLS12381Test {
     final Chunk chunk = validChunk(5);
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), chunk.signatures());
+        bls.prepareBatchVerifyChunk(chunk.publicKeys(), chunk.messages(), chunk.signatures());
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
   }
@@ -308,7 +307,7 @@ public class BlstTest extends AbstractBLS12381Test {
             .toList();
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifyChunk(0, publicKeys, messages, signatures);
+        bls.prepareBatchVerifyChunk(publicKeys, messages, signatures);
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
   }
@@ -319,7 +318,7 @@ public class BlstTest extends AbstractBLS12381Test {
     final Chunk chunk = validChunk(size);
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), chunk.signatures());
+        bls.prepareBatchVerifyChunk(chunk.publicKeys(), chunk.messages(), chunk.signatures());
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isTrue();
   }
@@ -333,7 +332,7 @@ public class BlstTest extends AbstractBLS12381Test {
         List.of(chunk.publicKeys().get(0), List.of(infinityKey), chunk.publicKeys().get(2));
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifyChunk(0, publicKeys, chunk.messages(), chunk.signatures());
+        bls.prepareBatchVerifyChunk(publicKeys, chunk.messages(), chunk.signatures());
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
   }
@@ -347,7 +346,7 @@ public class BlstTest extends AbstractBLS12381Test {
         List.of(List.of(infinityKey), List.of(infinityKey), List.of(infinityKey));
 
     final BatchSemiAggregate semiAggregate =
-        bls.prepareBatchVerifyChunk(0, publicKeys, chunk.messages(), chunk.signatures());
+        bls.prepareBatchVerifyChunk(publicKeys, chunk.messages(), chunk.signatures());
 
     assertThat(bls.completeBatchVerify(List.of(semiAggregate))).isFalse();
   }
@@ -360,7 +359,7 @@ public class BlstTest extends AbstractBLS12381Test {
 
     assertThrows(
         BlsException.class,
-        () -> bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), signatures));
+        () -> bls.prepareBatchVerifyChunk(chunk.publicKeys(), chunk.messages(), signatures));
   }
 
   @Test
@@ -381,9 +380,9 @@ public class BlstTest extends AbstractBLS12381Test {
     final BatchSemiAggregate chunkAggregate1 = prepareChunk(validChunk(5));
     final BatchSemiAggregate chunkAggregate2 = prepareChunk(validChunk(5));
     final BatchSemiAggregate groupAggregate =
-        bls.prepareBatchVerifySameMessage(5, groupPublicKeys, msg, groupSignatures, false);
+        bls.prepareBatchVerifySameMessage(groupPublicKeys, msg, groupSignatures, false);
     final BatchSemiAggregate invalidGroupAggregate =
-        bls.prepareBatchVerifySameMessage(5, groupPublicKeys, msg, invalidGroupSignatures, false);
+        bls.prepareBatchVerifySameMessage(groupPublicKeys, msg, invalidGroupSignatures, false);
 
     assertThat(bls.completeBatchVerify(List.of(chunkAggregate1, groupAggregate))).isTrue();
     assertThat(bls.completeBatchVerify(List.of(chunkAggregate2, invalidGroupAggregate))).isFalse();
@@ -404,7 +403,7 @@ public class BlstTest extends AbstractBLS12381Test {
   }
 
   private static BatchSemiAggregate prepareChunk(final Chunk chunk) {
-    return bls.prepareBatchVerifyChunk(0, chunk.publicKeys(), chunk.messages(), chunk.signatures());
+    return bls.prepareBatchVerifyChunk(chunk.publicKeys(), chunk.messages(), chunk.signatures());
   }
 
   private static List<Bytes> distinctMessages(final int count) {

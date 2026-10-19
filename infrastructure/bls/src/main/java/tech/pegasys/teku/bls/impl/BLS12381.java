@@ -147,7 +147,6 @@ public interface BLS12381 {
    * <p>For above batch verification method pre-calculates and returns two values: <code>
    * S1 * r1 + S2 * r2 + ...</code> and <code>e(P1 * r1 + P2 * r2 + ..., M)</code>
    *
-   * @param index index of the first signature in a batch
    * @param publicKeys one list of public keys per signature (aggregated per signature)
    * @param message the message all signatures are over
    * @param signatures the signatures, same size as publicKeys
@@ -155,7 +154,6 @@ public interface BLS12381 {
    * @return the pair of values above in an opaque instance
    */
   BatchSemiAggregate prepareBatchVerifySameMessage(
-      int index,
       List<? extends List<? extends PublicKey>> publicKeys,
       Bytes message,
       List<? extends Signature> signatures,
@@ -169,14 +167,12 @@ public interface BLS12381 {
    * #prepareBatchVerify(int, List, Bytes, Signature)}, but the pairs share one multi-pair Miller
    * loop. The result can be mixed with the results of the other prepare methods.
    *
-   * @param index index of the first signature in a batch
    * @param publicKeys one list of public keys per entry (aggregated per entry)
    * @param messages one message per entry, same size as publicKeys
    * @param signatures one signature per entry, same size as publicKeys
    * @return the accumulated values in an opaque instance
    */
   BatchSemiAggregate prepareBatchVerifyChunk(
-      int index,
       List<? extends List<? extends PublicKey>> publicKeys,
       List<Bytes> messages,
       List<? extends Signature> signatures);
@@ -189,8 +185,8 @@ public interface BLS12381 {
    *
    * @param preparedList the list of instances returned by {@link #prepareBatchVerify(int, List,
    *     Bytes, Signature)}, {@link #prepareBatchVerify2(int, List, Bytes, Signature, List, Bytes,
-   *     Signature)}, {@link #prepareBatchVerifySameMessage(int, List, Bytes, List, boolean)} or
-   *     {@link #prepareBatchVerifyChunk(int, List, List, List)}, or mixed from any of them
+   *     Signature)}, {@link #prepareBatchVerifySameMessage(List, Bytes, List, boolean)} or {@link
+   *     #prepareBatchVerifyChunk(List, List, List)}, or mixed from any of them
    * @return True if the verification is successful, false otherwise
    */
   boolean completeBatchVerify(List<? extends BatchSemiAggregate> preparedList);

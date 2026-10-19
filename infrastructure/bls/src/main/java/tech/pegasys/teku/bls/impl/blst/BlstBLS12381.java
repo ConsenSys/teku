@@ -167,7 +167,6 @@ public class BlstBLS12381 implements BLS12381 {
 
   @Override
   public BlstSemiAggregate prepareBatchVerifySameMessage(
-      final int index,
       final List<? extends List<? extends PublicKey>> publicKeys,
       final Bytes message,
       final List<? extends Signature> signatures,
@@ -214,7 +213,6 @@ public class BlstBLS12381 implements BLS12381 {
 
   @Override
   public BlstSemiAggregate prepareBatchVerifyChunk(
-      final int index,
       final List<? extends List<? extends PublicKey>> publicKeys,
       final List<Bytes> messages,
       final List<? extends Signature> signatures) {

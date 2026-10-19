@@ -125,24 +125,22 @@ public class RecordingBLS12381 implements BLS12381 {
 
   @Override
   public BatchSemiAggregate prepareBatchVerifySameMessage(
-      final int index,
       final List<? extends List<? extends PublicKey>> publicKeys,
       final Bytes message,
       final List<? extends Signature> signatures,
       final boolean parallel) {
     recordPrepareThread();
     sameMessageParallelArguments.add(parallel);
-    return delegate.prepareBatchVerifySameMessage(index, publicKeys, message, signatures, parallel);
+    return delegate.prepareBatchVerifySameMessage(publicKeys, message, signatures, parallel);
   }
 
   @Override
   public BatchSemiAggregate prepareBatchVerifyChunk(
-      final int index,
       final List<? extends List<? extends PublicKey>> publicKeys,
       final List<Bytes> messages,
       final List<? extends Signature> signatures) {
     recordPrepareThread();
-    return delegate.prepareBatchVerifyChunk(index, publicKeys, messages, signatures);
+    return delegate.prepareBatchVerifyChunk(publicKeys, messages, signatures);
   }
 
   @Override
