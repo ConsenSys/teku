@@ -51,16 +51,22 @@ public class InclusionListPayloadAttributesUpdater {
   @SuppressWarnings({"FutureReturnValueIgnored", "UnusedReturnValue"})
   public SafeFuture<Optional<Bytes8>> onInclusionListDue(final UInt64 slot) {
     final UInt64 proposerSlot = slot.increment();
+    // Avoid regenerating the proposer state every slot when no validator can propose
+    if (proposersDataManager.getPreparedProposerInfo().isEmpty()) {
+      LOG.trace(
+          "No prepared proposers, no payload attributes to refresh with inclusion lists for slot {}",
+          proposerSlot);
+      return SafeFuture.completedFuture(Optional.empty());
+    }
     return combinedChainDataClient
         .getStateAtSlotExact(slot)
         .thenComposeChecked(
             maybeState -> {
               if (maybeState.isEmpty()) {
-                LOG.warn(
+                LOG.debug(
                     "Ignoring payload attributes refresh with inclusion lists because state at slot {} is not available",
                     slot);
-                return SafeFuture.failedFuture(
-                    new IllegalStateException("Head state is not yet available"));
+                return SafeFuture.completedFuture(Optional.empty());
               }
               final BeaconState proposerState = spec.processSlots(maybeState.get(), proposerSlot);
               if (proposersDataManager.isProposerForSlot(proposerSlot, proposerState)) {
@@ -81,12 +87,12 @@ public class InclusionListPayloadAttributesUpdater {
 
   private SafeFuture<Optional<Bytes8>> updatePayloadAttributes(
       final UInt64 slot, final BeaconState state) {
-    LOG.info("Refreshing payload attributes with inclusion lists from slot {}", slot);
+    LOG.debug("Refreshing payload attributes with inclusion lists from slot {}", slot);
     final Bytes32 parentRoot = spec.getBlockRootAtSlot(state, slot);
     final UInt64 proposerSlot = slot.increment();
     final Optional<ForkChoiceNode> maybeParentForkChoiceNode = getParentForkChoiceNode(parentRoot);
     if (maybeParentForkChoiceNode.isEmpty()) {
-      LOG.warn(
+      LOG.debug(
           "Unable to refresh payload attributes with inclusion lists because parent root {} is not the chain head",
           parentRoot);
       return SafeFuture.completedFuture(Optional.empty());
@@ -114,7 +120,7 @@ public class InclusionListPayloadAttributesUpdater {
       final Optional<ExecutionPayloadContext> maybeExecutionPayloadContext,
       final Bytes32 parentRoot) {
     if (maybeExecutionPayloadContext.isEmpty()) {
-      LOG.warn(
+      LOG.debug(
           "Unable to refresh payload attributes with inclusion lists. No execution payload context present for slot {} and parent root {}",
           proposerSlot,
           parentRoot);
@@ -122,7 +128,7 @@ public class InclusionListPayloadAttributesUpdater {
     } else {
       final Optional<Bytes8> maybePayloadId =
           Optional.of(maybeExecutionPayloadContext.get().getPayloadId());
-      LOG.info(
+      LOG.debug(
           "Refreshed payload attributes with inclusion lists from slot {}. PayloadId: {}",
           inclusionListsSlot,
           maybePayloadId);

@@ -13,15 +13,19 @@
 
 package tech.pegasys.teku.validator.coordinator;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
+import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes8;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -34,6 +38,7 @@ import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
+import tech.pegasys.teku.statetransition.forkchoice.PreparedProposerInfo;
 import tech.pegasys.teku.statetransition.forkchoice.ProposersDataManager;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -52,6 +57,44 @@ class InclusionListPayloadAttributesUpdaterTest {
   private final InclusionListPayloadAttributesUpdater inclusionListPayloadAttributesUpdater =
       new InclusionListPayloadAttributesUpdater(
           forkChoiceNotifier, proposersDataManager, combinedChainDataClient, spec);
+
+  @BeforeEach
+  void setUp() {
+    when(proposersDataManager.getPreparedProposerInfo())
+        .thenReturn(Map.of(UInt64.ONE, mock(PreparedProposerInfo.class)));
+  }
+
+  @Test
+  void onInclusionListDue_shouldNotLoadStateWhenThereAreNoPreparedProposers() {
+    when(proposersDataManager.getPreparedProposerInfo()).thenReturn(Map.of());
+
+    assertThatSafeFuture(inclusionListPayloadAttributesUpdater.onInclusionListDue(UInt64.ONE))
+        .isCompletedWithEmptyOptional();
+
+    verifyNoInteractions(combinedChainDataClient, spec, forkChoiceNotifier);
+  }
+
+  @Test
+  void onInclusionListDue_shouldLogOnceAtDebugWhenStateIsNotAvailable() {
+    final UInt64 inclusionListSlot = UInt64.valueOf(10);
+    when(combinedChainDataClient.getStateAtSlotExact(inclusionListSlot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(InclusionListPayloadAttributesUpdater.class)) {
+      assertThatSafeFuture(
+              inclusionListPayloadAttributesUpdater.onInclusionListDue(inclusionListSlot))
+          .isCompletedWithEmptyOptional();
+
+      assertThat(logCaptor.getDebugLogs())
+          .containsExactly(
+              "Ignoring payload attributes refresh with inclusion lists because state at slot 10 is not available");
+      assertThat(logCaptor.getInfoLogs()).isEmpty();
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
+    verifyNoInteractions(forkChoiceNotifier);
+  }
 
   @Test
   void onInclusionListDue_shouldNotRefreshWhenNotProposer() throws Exception {
@@ -92,9 +135,15 @@ class InclusionListPayloadAttributesUpdaterTest {
     when(forkChoiceNotifier.preparePayloadAttributes(parentForkChoiceNode, proposerSlot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(executionPayloadContext)));
 
-    assertThatSafeFuture(
-            inclusionListPayloadAttributesUpdater.onInclusionListDue(inclusionListSlot))
-        .isCompletedWithOptionalContaining(payloadId);
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(InclusionListPayloadAttributesUpdater.class)) {
+      assertThatSafeFuture(
+              inclusionListPayloadAttributesUpdater.onInclusionListDue(inclusionListSlot))
+          .isCompletedWithOptionalContaining(payloadId);
+
+      assertThat(logCaptor.getInfoLogs()).isEmpty();
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+    }
 
     verify(forkChoiceNotifier).preparePayloadAttributes(parentForkChoiceNode, proposerSlot);
   }
