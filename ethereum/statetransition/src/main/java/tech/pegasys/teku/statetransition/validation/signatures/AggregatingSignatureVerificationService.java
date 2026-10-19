@@ -227,17 +227,12 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
         continue;
       }
       try {
-        task.completeAsync(verifyTaskSignatures(task));
+        task.completeAsync(batchVerify(task.publicKeys, task.messages, task.signatures));
       } catch (final RuntimeException ex) {
         // Isolate the failure to this task so the rest of the batch still completes.
         task.completeExceptionallyAsync(ex);
       }
     }
-  }
-
-  /** Verifies one task's signatures with the configured mode and thread policy. */
-  private boolean verifyTaskSignatures(final SignatureTask task) {
-    return batchVerify(task.publicKeys, task.messages, task.signatures);
   }
 
   /** Batch-verifies signatures with the configured mode and thread policy. */
@@ -266,7 +261,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     final List<SignatureTask> tasks = new ArrayList<>();
     try {
       int batchSize = maxBatchSize;
-      final SignatureTask firstTask = batchSignatureTasks.poll(30, TimeUnit.SECONDS);
+      final SignatureTask firstTask =
+          batchSignatureTasks.poll(IDLE_POLL_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
       if (firstTask != null) {
         tasks.add(firstTask);
         batchSize -= 1;
@@ -301,7 +297,7 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
 
         // Keep gathering for a short while so that a steady trickle of tasks forms a real batch
         final long deadline = gatherStart + batchGatherTimeoutNanos;
-        while (tasks.size() < batchGatherTargetSize && tasks.size() < maxBatchSize) {
+        while (tasks.size() < batchGatherTargetSize) {
           final long remainingNanos = deadline - System.nanoTime();
           if (remainingNanos <= 0) {
             break;
