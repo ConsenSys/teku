@@ -115,6 +115,16 @@
         payload_status: PayloadStatus  # One of PAYLOAD_STATUS_* values
     </spec>
 
+- name: GetInclusionListResponse#heze
+  sources:
+    - file: ethereum/executionclient/src/main/java/tech/pegasys/teku/ethereum/executionclient/methods/EngineGetInclusionListV1.java
+      search: public SafeFuture<List<Transaction>> execute(
+  spec: |
+    <spec dataclass="GetInclusionListResponse" fork="heze" hash="2d1de077">
+    class GetInclusionListResponse:
+        inclusion_list_transactions: Sequence[Transaction]
+    </spec>
+
 - name: GetPayloadResponse#bellatrix
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/execution/GetPayloadResponse.java
@@ -178,13 +188,24 @@
     </spec>
 
 - name: InclusionListEntry#heze
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/forkchoice/InclusionListEntry.java
   spec: |
     <spec dataclass="InclusionListEntry" fork="heze" hash="a9d09dc2">
     @dataclass(eq=True, frozen=True)
     class InclusionListEntry:
         signed_inclusion_list: SignedInclusionList
         timely: bool
+    </spec>
+
+- name: InclusionListStore#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/forkchoice/InclusionListStore.java
+  spec: |
+    <spec dataclass="InclusionListStore" fork="heze" hash="bd9d1c07">
+    class InclusionListStore:
+        inclusion_lists: defaultdict[tuple[Slot, Root], dict[ValidatorIndex, InclusionListEntry]]
+        equivocators: defaultdict[tuple[Slot, Root], set[ValidatorIndex]]
     </spec>
 
 - name: LatestMessage#phase0
@@ -302,6 +323,23 @@
         slot_number: Uint64
         # [New in Gloas]
         target_gas_limit: Uint64
+    </spec>
+
+- name: PayloadAttributes#heze
+  sources:
+    - file: ethereum/executionclient/src/main/java/tech/pegasys/teku/ethereum/executionclient/schema/PayloadAttributesV5.java
+  spec: |
+    <spec dataclass="PayloadAttributes" fork="heze" hash="c1298bc5">
+    class PayloadAttributes:
+        timestamp: Uint64
+        prev_randao: Bytes32
+        suggested_fee_recipient: ExecutionAddress
+        withdrawals: Sequence[Withdrawal]
+        parent_beacon_block_root: Root
+        slot_number: Uint64
+        target_gas_limit: Uint64
+        # [New in Heze:EIP7805]
+        inclusion_list_transactions: Sequence[Transaction]
     </spec>
 
 - name: Seen#deneb
