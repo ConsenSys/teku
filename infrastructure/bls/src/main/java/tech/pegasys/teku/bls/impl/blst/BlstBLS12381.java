@@ -103,6 +103,10 @@ public class BlstBLS12381 implements BLS12381 {
 
   @Override
   public BlstPublicKey aggregatePublicKeys(final List<? extends PublicKey> publicKeys) {
+    return aggregateBlstPublicKeys(publicKeys);
+  }
+
+  private static BlstPublicKey aggregateBlstPublicKeys(final List<? extends PublicKey> publicKeys) {
     return BlstPublicKey.aggregate(publicKeys.stream().map(BlstPublicKey::fromPublicKey).toList());
   }
 
@@ -262,8 +266,7 @@ public class BlstBLS12381 implements BLS12381 {
     private boolean valid = true;
 
     void addScaled(final List<? extends PublicKey> publicKeys, final Signature signature) {
-      final BlstPublicKey aggrPubKey =
-          BlstPublicKey.aggregate(publicKeys.stream().map(BlstPublicKey::fromPublicKey).toList());
+      final BlstPublicKey aggrPubKey = aggregateBlstPublicKeys(publicKeys);
       if (aggrPubKey.isInfinity()) {
         valid = false;
         return;
