@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -105,7 +105,13 @@ public class GenesisGenerator {
     state.setEth1Data(
         new Eth1Data(
             Bytes32.ZERO, UInt64.valueOf(depositDataList.size() + deposits.size()), eth1BlockHash));
-    if (genesisSpec.getMilestone().isGreaterThanOrEqualTo(SpecMilestone.ELECTRA)) {
+    if (genesisSpec.getMilestone().isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
+      // Fulu removed the Eth1 deposit bridge (consensus-specs #4704), so genesis starts deposit
+      // requests right after the genesis deposits
+      MutableBeaconStateElectra.required(state)
+          .setDepositRequestsStartIndex(state.getEth1Data().getDepositCount());
+    } else if (genesisSpec.getMilestone() == SpecMilestone.ELECTRA) {
+      // Electra genesis leaves the index unset until the first deposit request sets it (EIP-6110)
       MutableBeaconStateElectra.required(state)
           .setDepositRequestsStartIndex(UNSET_DEPOSIT_REQUESTS_START_INDEX);
     }

@@ -1,7 +1,7 @@
 Sign the CLA
 =============
 
-This page is the step-by-step guide to signing the Consensys Software Inc.
+This page is the step-by-step guide to signing the Consensys Incorporated
 Individual Contributor License Agreement.
 
 1. First and foremost, read [the current version of the CLA].
