@@ -251,37 +251,26 @@ public class InclusionListManager implements SlotEventsChannel {
     return spec.atSlot(proposalSlot)
         .getInclusionListUtil()
         .map(
-            inclusionListUtil -> {
-              final UInt64 inclusionListSlot = proposalSlot.decrement();
-              return recentChainData
-                  .retrieveBlockState(new SlotAndBlockRoot(proposalSlot, parentRoot))
-                  .thenApply(
-                      maybeState ->
-                          maybeState.map(
-                              state -> {
-                                final Bytes32 dependentRoot =
-                                    recentChainData
-                                        .getForkChoiceStrategy()
-                                        .flatMap(
-                                            strategy ->
-                                                ShufflingDependentRootUtil
-                                                    .getShufflingDependentRoot(
-                                                        spec,
-                                                        strategy,
-                                                        parentRoot,
-                                                        inclusionListSlot))
-                                        .orElseGet(
-                                            () ->
-                                                ShufflingDependentRootUtil
-                                                    .getShufflingDependentRoot(
-                                                        spec, state, inclusionListSlot));
-                                return inclusionListStore.getInclusionListBits(
-                                    inclusionListUtil.getInclusionListCommittee(
-                                        state, inclusionListSlot),
-                                    new SlotAndBlockRoot(inclusionListSlot, dependentRoot),
-                                    false);
-                              }));
-            })
+            inclusionListUtil ->
+                recentChainData
+                    .retrieveBlockState(new SlotAndBlockRoot(proposalSlot, parentRoot))
+                    .thenApply(
+                        maybeState ->
+                            maybeState.map(
+                                state -> {
+                                  final SlotAndBlockRoot inclusionListKey =
+                                      ShufflingDependentRootUtil.getInclusionListKey(
+                                          spec,
+                                          recentChainData.getForkChoiceStrategy(),
+                                          parentRoot,
+                                          state,
+                                          proposalSlot);
+                                  return inclusionListStore.getInclusionListBits(
+                                      inclusionListUtil.getInclusionListCommittee(
+                                          state, inclusionListKey.getSlot()),
+                                      inclusionListKey,
+                                      false);
+                                })))
         .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
 

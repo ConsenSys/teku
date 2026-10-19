@@ -353,21 +353,12 @@ public class DefaultExecutionPayloadBidManager
         .getInclusionListUtil()
         .map(
             util -> {
-              final UInt64 inclusionListSlot = state.getSlot().decrement();
-              final Bytes32 dependentRoot =
-                  forkChoiceStrategySupplier
-                      .get()
-                      .flatMap(
-                          strategy ->
-                              ShufflingDependentRootUtil.getShufflingDependentRoot(
-                                  spec, strategy, parentRoot, inclusionListSlot))
-                      .orElseGet(
-                          () ->
-                              ShufflingDependentRootUtil.getShufflingDependentRoot(
-                                  spec, state, inclusionListSlot));
+              final SlotAndBlockRoot inclusionListKey =
+                  ShufflingDependentRootUtil.getInclusionListKey(
+                      spec, forkChoiceStrategySupplier.get(), parentRoot, state, state.getSlot());
               return inclusionListStore.getInclusionListBits(
-                  util.getInclusionListCommittee(state, inclusionListSlot),
-                  new SlotAndBlockRoot(inclusionListSlot, dependentRoot),
+                  util.getInclusionListCommittee(state, inclusionListKey.getSlot()),
+                  inclusionListKey,
                   false);
             });
   }

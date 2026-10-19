@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 import javax.annotation.CheckReturnValue;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -843,11 +844,12 @@ public class ForkChoiceUtil {
    * The inclusion lists a payload must satisfy, as used by {@code
    * record_payload_inclusion_list_satisfaction}.
    *
-   * @param inclusionListKey the previous slot and the shuffling dependent root of the payload's
-   *     beacon block for that slot's epoch
+   * @param inclusionListKeySupplier supplies the previous slot and the shuffling dependent root of
+   *     the payload's beacon block for that slot's epoch; only called from Heze
    */
   public Optional<List<InclusionList>> getInclusionListsForPayloadValidation(
-      final InclusionListStore inclusionListStore, final SlotAndBlockRoot inclusionListKey) {
+      final InclusionListStore inclusionListStore,
+      final Supplier<SlotAndBlockRoot> inclusionListKeySupplier) {
     return Optional.empty();
   }
 

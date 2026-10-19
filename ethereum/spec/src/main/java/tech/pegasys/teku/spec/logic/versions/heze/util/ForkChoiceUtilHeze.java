@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.logic.versions.heze.util;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
@@ -66,7 +67,8 @@ public class ForkChoiceUtilHeze extends ForkChoiceUtilGloas {
 
   @Override
   public Optional<List<InclusionList>> getInclusionListsForPayloadValidation(
-      final InclusionListStore inclusionListStore, final SlotAndBlockRoot inclusionListKey) {
-    return Optional.of(inclusionListStore.getTimelyInclusionLists(inclusionListKey));
+      final InclusionListStore inclusionListStore,
+      final Supplier<SlotAndBlockRoot> inclusionListKeySupplier) {
+    return Optional.of(inclusionListStore.getTimelyInclusionLists(inclusionListKeySupplier.get()));
   }
 }

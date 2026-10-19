@@ -52,7 +52,6 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Be
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
-import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 
 public class ExecutionPayloadBidGossipValidator {
 
@@ -386,21 +385,16 @@ public class ExecutionPayloadBidGossipValidator {
                * [IGNORE] The bid's inclusion list bits is inclusive
                */
               if (bid instanceof ExecutionPayloadBidHeze hezeBid) {
-                final UInt64 inclusionListSlot = bid.getSlot().decrement();
-                final Bytes32 inclusionListDependentRoot =
-                    gossipValidationHelper
-                        .getShufflingDependentRoot(bid.getParentBlockRoot(), inclusionListSlot)
-                        .orElseGet(
-                            () ->
-                                ShufflingDependentRootUtil.getShufflingDependentRoot(
-                                    spec, state, inclusionListSlot));
+                final SlotAndBlockRoot inclusionListKey =
+                    gossipValidationHelper.getInclusionListKey(
+                        bid.getParentBlockRoot(), state, bid.getSlot());
                 final SszBitvector inclusionListBits =
                     inclusionListStore.getInclusionListBits(
                         spec.atSlot(bid.getSlot())
                             .getInclusionListUtil()
                             .orElseThrow()
-                            .getInclusionListCommittee(state, inclusionListSlot),
-                        new SlotAndBlockRoot(inclusionListSlot, inclusionListDependentRoot),
+                            .getInclusionListCommittee(state, inclusionListKey.getSlot()),
+                        inclusionListKey,
                         true);
                 if (!inclusionListBits
                     .streamAllSetBits()

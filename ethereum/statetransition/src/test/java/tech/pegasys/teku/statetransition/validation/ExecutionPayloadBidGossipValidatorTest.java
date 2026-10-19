@@ -55,6 +55,7 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
@@ -248,23 +249,6 @@ public class ExecutionPayloadBidGossipValidatorTest {
     assertThatSafeFuture(
             bidValidator.validate(dataStructureUtil.randomSignedExecutionPayloadBid(inclusiveBid)))
         .isCompletedWithValue(ACCEPT);
-  }
-
-  @TestTemplate
-  void shouldCheckHistoricalRootWhenInclusionListAncestorIsFinalized() {
-    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
-    when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot.decrement()))
-        .thenReturn(Optional.empty());
-    final UInt64 inclusionListEpoch = UInt64.valueOf(7);
-    when(spec.computeEpochAtSlot(slot.decrement())).thenReturn(inclusionListEpoch);
-    when(spec.getSpecConfig(inclusionListEpoch))
-        .thenReturn(TestSpecFactory.createMinimalHeze().atSlot(UInt64.ZERO).getConfig());
-    when(spec.computeStartSlotAtEpoch(UInt64.valueOf(6))).thenReturn(UInt64.valueOf(48));
-    when(spec.getBlockRootAtSlot(postState, UInt64.valueOf(47))).thenReturn(dependentRoot);
-    addInclusionList(true);
-
-    assertThatSafeFuture(bidValidator.validate(signedBid))
-        .isCompletedWithValueMatching(result -> result.code() == ValidationResultCode.IGNORE);
   }
 
   @TestTemplate
@@ -1376,9 +1360,9 @@ public class ExecutionPayloadBidGossipValidatorTest {
               new IntArrayList(
                   IntStream.range(0, hezeBid.getInclusionListBits().size()).toArray()));
       when(specVersion.getInclusionListUtil()).thenReturn(Optional.of(inclusionListUtil));
-      when(gossipValidationHelper.getShufflingDependentRoot(
-              message.getParentBlockRoot(), message.getSlot().decrement()))
-          .thenReturn(Optional.of(dependentRoot));
+      when(gossipValidationHelper.getInclusionListKey(
+              message.getParentBlockRoot(), postState, message.getSlot()))
+          .thenReturn(new SlotAndBlockRoot(message.getSlot().decrement(), dependentRoot));
     }
   }
 

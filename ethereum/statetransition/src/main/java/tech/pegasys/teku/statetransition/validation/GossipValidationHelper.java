@@ -400,6 +400,16 @@ public class GossipValidationHelper {
         spec, maybeForkChoiceStrategy.get(), blockRoot, proposalSlot);
   }
 
+  /**
+   * The inclusion list store key for a proposal in {@code slot} on top of {@code parentRoot}. See
+   * {@link ShufflingDependentRootUtil#getInclusionListKey}.
+   */
+  public SlotAndBlockRoot getInclusionListKey(
+      final Bytes32 parentRoot, final BeaconState parentState, final UInt64 slot) {
+    return ShufflingDependentRootUtil.getInclusionListKey(
+        spec, recentChainData.getForkChoiceStrategy(), parentRoot, parentState, slot);
+  }
+
   public boolean builderHasEnoughBalanceForBid(
       final UInt64 bidValue,
       final UInt64 builderIndex,

@@ -346,15 +346,10 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
     if (blockSlot.isZero() || !spec.isInclusionListAvailableAtSlot(blockSlot)) {
       return List.of();
     }
-    final UInt64 inclusionListSlot = blockSlot.decrement();
-    final Bytes32 dependentRoot =
-        getShufflingDependentRoot(parentBeaconBlock.blockRoot(), inclusionListSlot)
-            .orElseGet(
-                () ->
-                    ShufflingDependentRootUtil.getShufflingDependentRoot(
-                        spec, state, inclusionListSlot));
     return inclusionListStore.getInclusionListTransactions(
-        new SlotAndBlockRoot(inclusionListSlot, dependentRoot), false);
+        ShufflingDependentRootUtil.getInclusionListKey(
+            spec, getForkChoiceStrategy(), parentBeaconBlock.blockRoot(), state, blockSlot),
+        false);
   }
 
   private SafeFuture<Optional<List<Withdrawal>>> getPayloadAttributeWithdrawals(
@@ -419,13 +414,17 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
 
   private Optional<Bytes32> getShufflingDependentRoot(
       final Bytes32 blockRoot, final UInt64 proposalSlot) {
+    return getForkChoiceStrategy()
+        .flatMap(
+            forkChoiceStrategy ->
+                ShufflingDependentRootUtil.getShufflingDependentRoot(
+                    spec, forkChoiceStrategy, blockRoot, proposalSlot));
+  }
+
+  private Optional<ReadOnlyForkChoiceStrategy> getForkChoiceStrategy() {
     final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
         recentChainData.getForkChoiceStrategy();
-    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
-      return Optional.empty();
-    }
-    return ShufflingDependentRootUtil.getShufflingDependentRoot(
-        spec, maybeForkChoiceStrategy.get(), blockRoot, proposalSlot);
+    return maybeForkChoiceStrategy == null ? Optional.empty() : maybeForkChoiceStrategy;
   }
 
   // this function MUST return a fee recipient.

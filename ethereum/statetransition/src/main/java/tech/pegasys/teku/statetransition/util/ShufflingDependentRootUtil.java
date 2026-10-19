@@ -18,6 +18,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
@@ -61,5 +62,38 @@ public final class ShufflingDependentRootUtil {
     return dependentSlot.equals(state.getSlot())
         ? BeaconBlockHeader.fromState(state).getRoot()
         : spec.getBlockRootAtSlot(state, dependentSlot);
+  }
+
+  /**
+   * The inclusion list store key for a proposal or payload in {@code slot}: the previous slot and
+   * the shuffling dependent root of {@code blockRoot}'s chain for that slot's epoch, as in {@code
+   * record_payload_inclusion_list_satisfaction} and {@code prepare_execution_payload}. Fork choice
+   * is used when it knows the dependent block, else {@code state}, which must be on {@code
+   * blockRoot}'s chain with block roots covering the dependent slot.
+   */
+  public static SlotAndBlockRoot getInclusionListKey(
+      final Spec spec,
+      final Optional<? extends ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy,
+      final Bytes32 blockRoot,
+      final BeaconState state,
+      final UInt64 slot) {
+    final UInt64 inclusionListSlot = slot.minusMinZero(ONE);
+    return maybeForkChoiceStrategy
+        .flatMap(
+            forkChoiceStrategy ->
+                getShufflingDependentRoot(spec, forkChoiceStrategy, blockRoot, inclusionListSlot))
+        .map(dependentRoot -> new SlotAndBlockRoot(inclusionListSlot, dependentRoot))
+        .orElseGet(() -> getInclusionListKey(spec, state, slot));
+  }
+
+  /**
+   * The inclusion list store key for a proposal or payload in {@code slot}, resolved from {@code
+   * state} alone. See {@link #getInclusionListKey(Spec, Optional, Bytes32, BeaconState, UInt64)}.
+   */
+  public static SlotAndBlockRoot getInclusionListKey(
+      final Spec spec, final BeaconState state, final UInt64 slot) {
+    final UInt64 inclusionListSlot = slot.minusMinZero(ONE);
+    return new SlotAndBlockRoot(
+        inclusionListSlot, getShufflingDependentRoot(spec, state, inclusionListSlot));
   }
 }
