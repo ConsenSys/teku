@@ -17,6 +17,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -45,6 +46,7 @@ import tech.pegasys.teku.networking.eth2.gossip.forks.versions.GossipForkSubscri
 import tech.pegasys.teku.networking.eth2.gossip.forks.versions.GossipForkSubscriptionsGloas;
 import tech.pegasys.teku.networking.eth2.gossip.forks.versions.GossipForkSubscriptionsGloasBpo;
 import tech.pegasys.teku.networking.eth2.gossip.forks.versions.GossipForkSubscriptionsHeze;
+import tech.pegasys.teku.networking.eth2.gossip.forks.versions.GossipForkSubscriptionsHezeBpo;
 import tech.pegasys.teku.networking.eth2.gossip.forks.versions.GossipForkSubscriptionsPhase0;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.AttestationSubnetTopicProvider;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.DataColumnSidecarSubnetTopicProvider;
@@ -262,7 +264,8 @@ public class Eth2P2PNetworkBuilder {
         config.isAllTopicsFilterEnabled());
   }
 
-  private GossipForkManager buildGossipForkManager(
+  @VisibleForTesting
+  GossipForkManager buildGossipForkManager(
       final GossipEncoding gossipEncoding, final DiscoveryNetwork<?> network) {
     final GossipForkManager.Builder gossipForkManagerBuilder =
         GossipForkManager.builder()
@@ -544,7 +547,7 @@ public class Eth2P2PNetworkBuilder {
               bpo,
               config.isExecutionProofTopicEnabled(),
               isSuperNodeSupplier);
-      case GLOAS, HEZE ->
+      case GLOAS ->
           new GossipForkSubscriptionsGloasBpo(
               forkAndSpecMilestone.getFork(),
               spec,
@@ -570,6 +573,39 @@ public class Eth2P2PNetworkBuilder {
               payloadAttestationMessageProcessor,
               executionPayloadBidProcessor,
               proposerPreferencesProcessor,
+              executionProofOperationProcessor,
+              debugDataDumper,
+              dasGossipLogger,
+              bpo,
+              config.isExecutionProofTopicEnabled(),
+              isSuperNodeSupplier);
+      case HEZE ->
+          new GossipForkSubscriptionsHezeBpo(
+              forkAndSpecMilestone.getFork(),
+              spec,
+              asyncRunner,
+              metricsSystem,
+              network,
+              combinedChainDataClient.getRecentChainData(),
+              gossipEncoding,
+              gossipedBlockProcessor,
+              gossipedBlobSidecarProcessor,
+              gossipedAttestationConsumer,
+              gossipedAggregateProcessor,
+              gossipedAttesterSlashingConsumer,
+              gossipedProposerSlashingConsumer,
+              gossipedVoluntaryExitConsumer,
+              gossipedSignedContributionAndProofProcessor,
+              gossipedSyncCommitteeMessageProcessor,
+              lightClientFinalityUpdateProcessor,
+              lightClientOptimisticUpdateProcessor,
+              gossipedSignedBlsToExecutionChangeProcessor,
+              dataColumnSidecarOperationProcessor,
+              executionPayloadProcessor,
+              payloadAttestationMessageProcessor,
+              executionPayloadBidProcessor,
+              proposerPreferencesProcessor,
+              inclusionListProcessor,
               executionProofOperationProcessor,
               debugDataDumper,
               dasGossipLogger,

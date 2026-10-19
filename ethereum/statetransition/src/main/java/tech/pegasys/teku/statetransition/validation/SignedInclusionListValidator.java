@@ -23,6 +23,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
@@ -92,6 +93,12 @@ public class SignedInclusionListValidator {
     }
     // Only current slot inclusion lists can be valid, so earlier slots' counts are no longer needed
     seenInclusionListCounts.headMap(slot.minusMinZero(UInt64.ONE)).clear();
+
+    // Gossip only accepts inclusion lists on the Heze topic, but the local API path doesn't
+    if (spec.atSlot(slot).getMilestone().isLessThan(SpecMilestone.HEZE)) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.reject("Inclusion List slot %s is before the Heze fork", slot));
+    }
 
     final Fork fork = spec.fork(spec.computeEpochAtSlot(slot));
     final SpecConfigHeze specConfigHeze =
