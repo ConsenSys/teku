@@ -54,6 +54,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -63,6 +64,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestTemplate;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.NetworkDataProvider;
 import tech.pegasys.teku.api.NodeDataProvider;
@@ -109,6 +111,9 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.Transaction;
+import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
+import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
@@ -158,6 +163,8 @@ import tech.pegasys.teku.validator.coordinator.publisher.SignedInclusionListPubl
 class ValidatorApiHandlerTest {
   private static final Logger LOG = LogManager.getLogger();
   private static final UInt64 EPOCH = UInt64.valueOf(13);
+  // ValidatorLogger's logger name (LoggingConfigurator.VALIDATOR_LOGGER_NAME is package-private)
+  private static final String VALIDATOR_LOG = "teku-validator-log";
   private static final UInt64 PREVIOUS_EPOCH = EPOCH.minus(ONE);
 
   private final CombinedChainDataClient chainDataClient = mock(CombinedChainDataClient.class);
@@ -390,6 +397,186 @@ class ValidatorApiHandlerTest {
             new InclusionListDutiesGenerator(spec)
                 .getInclusionListDutiesFromIndicesAndState(state, EPOCH, IntList.of(1), false));
     verify(chainDataClient).getStateAtSlotExact(previousEpochStartSlot);
+  }
+
+  @Test
+  void createInclusionList_shouldReturnInclusionListFromFactory() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final InclusionList inclusionList = dataStructureUtil.randomInclusionList();
+    final UInt64 slot = inclusionList.getSlot();
+    final UInt64 validatorIndex = inclusionList.getValidatorIndex();
+    when(inclusionListFactory.createInclusionList(slot, validatorIndex))
+        .thenReturn(completedFuture(Optional.of(inclusionList)));
+
+    assertThat(validatorApiHandler.createInclusionList(slot, validatorIndex))
+        .isCompletedWithValue(Optional.of(inclusionList));
+    verify(inclusionListFactory).createInclusionList(slot, validatorIndex);
+  }
+
+  @Test
+  void createInclusionList_shouldReturnEmptyWhenFactoryReturnsEmpty() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    when(inclusionListFactory.createInclusionList(epochStartSlot, ONE))
+        .thenReturn(completedFuture(Optional.empty()));
+
+    assertThat(validatorApiHandler.createInclusionList(epochStartSlot, ONE))
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  void createInclusionList_shouldPropagateFactoryFailureForPreHezeSlot() {
+    when(inclusionListFactory.createInclusionList(epochStartSlot, ONE))
+        .thenReturn(SafeFuture.failedFuture(new IllegalArgumentException("pre-Heze slot")));
+
+    final SafeFuture<Optional<InclusionList>> result =
+        validatorApiHandler.createInclusionList(epochStartSlot, ONE);
+
+    assertThatSafeFuture(result)
+        .isCompletedExceptionallyWith(IllegalArgumentException.class)
+        .hasMessage("pre-Heze slot");
+  }
+
+  @Test
+  void getInclusionList_shouldReturnTransactionsFromFactory() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final List<Transaction> transactions =
+        dataStructureUtil.randomInclusionList().getTransactions().asList();
+    when(inclusionListFactory.getInclusionList(epochStartSlot))
+        .thenReturn(completedFuture(Optional.of(transactions)));
+
+    assertThat(validatorApiHandler.getInclusionList(epochStartSlot))
+        .isCompletedWithValue(Optional.of(transactions));
+    verify(inclusionListFactory).getInclusionList(epochStartSlot);
+  }
+
+  @Test
+  void getInclusionList_shouldPropagateFactoryFailureForPreHezeSlot() {
+    when(inclusionListFactory.getInclusionList(epochStartSlot))
+        .thenReturn(SafeFuture.failedFuture(new IllegalArgumentException("pre-Heze slot")));
+
+    final SafeFuture<Optional<List<Transaction>>> result =
+        validatorApiHandler.getInclusionList(epochStartSlot);
+
+    assertThatSafeFuture(result)
+        .isCompletedExceptionallyWith(IllegalArgumentException.class)
+        .hasMessage("pre-Heze slot");
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldAllowEmptyRequest() {
+    assertThat(validatorApiHandler.sendSignedInclusionLists(emptyList()))
+        .isCompletedWithValue(emptyList());
+    verifyNoInteractions(signedInclusionListPublisher);
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldReturnNoErrorsWhenAllAccepted() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList inclusionList1 = dataStructureUtil.randomSignedInclusionList();
+    final SignedInclusionList inclusionList2 = dataStructureUtil.randomSignedInclusionList();
+    when(signedInclusionListPublisher.sendInclusionList(any()))
+        .thenReturn(completedFuture(InternalValidationResult.ACCEPT));
+
+    assertThat(
+            validatorApiHandler.sendSignedInclusionLists(List.of(inclusionList1, inclusionList2)))
+        .isCompletedWithValue(emptyList());
+    verify(signedInclusionListPublisher).sendInclusionList(inclusionList1);
+    verify(signedInclusionListPublisher).sendInclusionList(inclusionList2);
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldNotReportIgnoredOrDeferredInclusionListsAsErrors() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList ignored = dataStructureUtil.randomSignedInclusionList();
+    final SignedInclusionList deferred = dataStructureUtil.randomSignedInclusionList();
+    when(signedInclusionListPublisher.sendInclusionList(ignored))
+        .thenReturn(
+            completedFuture(InternalValidationResult.ignore("Inclusion List is not current")));
+    when(signedInclusionListPublisher.sendInclusionList(deferred))
+        .thenReturn(completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
+
+    try (final LogCaptor logCaptor = LogCaptor.forLoggerName(VALIDATOR_LOG, Level.ERROR)) {
+      assertThat(validatorApiHandler.sendSignedInclusionLists(List.of(ignored, deferred)))
+          .isCompletedWithValue(emptyList());
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldReturnErrorAndLogWhenRejected() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList inclusionList = dataStructureUtil.randomSignedInclusionList();
+    when(signedInclusionListPublisher.sendInclusionList(inclusionList))
+        .thenReturn(completedFuture(InternalValidationResult.reject("Bad inclusion list")));
+
+    try (final LogCaptor logCaptor = LogCaptor.forLoggerName(VALIDATOR_LOG, Level.ERROR)) {
+      assertThat(validatorApiHandler.sendSignedInclusionLists(List.of(inclusionList)))
+          .isCompletedWithValue(List.of(new SubmitDataError(ZERO, "Bad inclusion list")));
+      logCaptor.assertErrorLog(
+          "Produced invalid inclusion list for slot "
+              + inclusionList.getMessage().getSlot()
+              + ": Bad inclusion list");
+    }
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldMapMixedResultsToCorrectIndices() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList accepted = dataStructureUtil.randomSignedInclusionList();
+    final SignedInclusionList rejected1 = dataStructureUtil.randomSignedInclusionList();
+    final SignedInclusionList ignored = dataStructureUtil.randomSignedInclusionList();
+    final SignedInclusionList rejected2 = dataStructureUtil.randomSignedInclusionList();
+    when(signedInclusionListPublisher.sendInclusionList(accepted))
+        .thenReturn(completedFuture(InternalValidationResult.ACCEPT));
+    when(signedInclusionListPublisher.sendInclusionList(rejected1))
+        .thenReturn(completedFuture(InternalValidationResult.reject("First reason")));
+    when(signedInclusionListPublisher.sendInclusionList(ignored))
+        .thenReturn(completedFuture(InternalValidationResult.IGNORE));
+    when(signedInclusionListPublisher.sendInclusionList(rejected2))
+        .thenReturn(completedFuture(InternalValidationResult.reject("Second reason")));
+
+    assertThat(
+            validatorApiHandler.sendSignedInclusionLists(
+                List.of(accepted, rejected1, ignored, rejected2)))
+        .isCompletedWithValue(
+            List.of(
+                new SubmitDataError(ONE, "First reason"),
+                new SubmitDataError(UInt64.valueOf(3), "Second reason")));
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldMapPublisherRejectionOfWrongForkToSubmitDataError() {
+    // ValidatorApiHandler does no fork check of its own: a rejection the publisher returns for an
+    // inclusion list that is not valid for the current fork is surfaced as a per-index error
+    setUp(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList inclusionList = dataStructureUtil.randomSignedInclusionList();
+    when(signedInclusionListPublisher.sendInclusionList(inclusionList))
+        .thenReturn(completedFuture(InternalValidationResult.reject("Incorrect spec milestone")));
+
+    assertThat(validatorApiHandler.sendSignedInclusionLists(List.of(inclusionList)))
+        .isCompletedWithValue(List.of(new SubmitDataError(ZERO, "Incorrect spec milestone")));
+  }
+
+  @Test
+  void sendSignedInclusionLists_shouldFailWholeRequestWhenPublisherFails() {
+    // Same as sendSignedAttestations / sendPayloadAttestationMessages: SafeFuture.collectAll
+    // fails the whole request rather than reporting a per-index error
+    setUp(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList accepted = dataStructureUtil.randomSignedInclusionList();
+    final SignedInclusionList failing = dataStructureUtil.randomSignedInclusionList();
+    when(signedInclusionListPublisher.sendInclusionList(accepted))
+        .thenReturn(completedFuture(InternalValidationResult.ACCEPT));
+    when(signedInclusionListPublisher.sendInclusionList(failing))
+        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("Publisher failure")));
+
+    final SafeFuture<List<SubmitDataError>> result =
+        validatorApiHandler.sendSignedInclusionLists(List.of(accepted, failing));
+
+    assertThatSafeFuture(result)
+        .isCompletedExceptionallyWith(IllegalStateException.class)
+        .hasMessage("Publisher failure");
+    verify(signedInclusionListPublisher).sendInclusionList(accepted);
+    verify(signedInclusionListPublisher).sendInclusionList(failing);
   }
 
   @Test
