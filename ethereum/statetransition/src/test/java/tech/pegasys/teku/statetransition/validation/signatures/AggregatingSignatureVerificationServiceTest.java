@@ -574,6 +574,26 @@ public class AggregatingSignatureVerificationServiceTest {
     }
   }
 
+  @ParameterizedTest
+  @EnumSource(SignatureVerificationMode.class)
+  public void run_exitsInsteadOfSpinningWhenWorkerIsInterrupted(
+      final SignatureVerificationMode mode) throws Exception {
+    service = createService(mode, batchGatherTimeout);
+    startService();
+
+    final Thread worker = new Thread(service::run, "interrupted-worker");
+    worker.start();
+    // Wait until the worker is blocked waiting for a batch, then interrupt it
+    Waiter.waitFor(() -> assertThat(worker.getState()).isEqualTo(Thread.State.TIMED_WAITING));
+    worker.interrupt();
+    worker.join(TimeUnit.SECONDS.toMillis(5));
+
+    // The service is still running but the worker must not keep re-polling with the interrupt
+    // flag set, which would throw immediately on every iteration
+    assertThat(service.isRunning()).isTrue();
+    assertThat(worker.isAlive()).isFalse();
+  }
+
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void legacyMode_waitForBatchReturnsWithoutGathering() {

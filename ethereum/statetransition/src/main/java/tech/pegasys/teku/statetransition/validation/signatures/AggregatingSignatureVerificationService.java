@@ -191,7 +191,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     return task.result;
   }
 
-  private void run() {
+  @VisibleForTesting
+  void run() {
     while (isRunning()) {
       final List<SignatureTask> tasks = waitForBatch();
       if (!tasks.isEmpty()) {
@@ -204,6 +205,15 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
           LOG.error("Unexpected error during batch signature verification", ex);
           verifyTasksIndividually(tasks);
         }
+      }
+      if (Thread.currentThread().isInterrupted()) {
+        // waitForBatch re-sets the interrupt flag after an InterruptedException. Polling the queue
+        // again would throw immediately and spin, so let the worker exit: its executor is
+        // shutting down.
+        if (isRunning()) {
+          LOG.warn("Signature verification worker interrupted while the service is running");
+        }
+        return;
       }
     }
   }
