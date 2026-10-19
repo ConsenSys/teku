@@ -2248,6 +2248,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
           new LightClientOptimisticUpdateGossipValidator(
               spec, recentChainData, lightClientUpdateStore, timeProvider);
       p2pNetworkBuilder
+          .lightClientUpdateStore(lightClientUpdateStore)
           .gossipedLightClientFinalityUpdateProcessor(
               (update, arrivalTimestamp) -> finalityValidator.validate(update))
           .gossipedLightClientOptimisticUpdateProcessor(

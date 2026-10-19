@@ -18,10 +18,12 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.networking.eth2.peers.PeerLookup;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BeaconBlocksByRangeMessageHandler;
@@ -33,6 +35,7 @@ import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidec
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.ExecutionPayloadEnvelopesByRangeMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.ExecutionPayloadEnvelopesByRootMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.GoodbyeMessageHandler;
+import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.LightClientLatestUpdateMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.MetadataMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.MetadataMessagesFactory;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.PingMessageHandler;
@@ -52,6 +55,8 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BeaconBlocksByRangeRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BeaconBlocksByRangeRequestMessage.BeaconBlocksByRangeRequestMessageSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
@@ -77,6 +82,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarArchiveReconstructor;
 import tech.pegasys.teku.statetransition.datacolumns.log.rpc.DasReqRespLogger;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -106,6 +112,10 @@ public class BeaconChainMethods {
       executionPayloadEnvelopesByRange;
   private final Eth2RpcMethod<EmptyMessage, MetadataMessage> getMetadata;
   private final Eth2RpcMethod<PingMessage, PingMessage> ping;
+  private final Optional<Eth2RpcMethod<EmptyMessage, LightClientFinalityUpdate>>
+      lightClientFinalityUpdate;
+  private final Optional<Eth2RpcMethod<EmptyMessage, LightClientOptimisticUpdate>>
+      lightClientOptimisticUpdate;
 
   private final Collection<RpcMethod<?, ?, ?>> allMethods;
 
@@ -131,7 +141,11 @@ public class BeaconChainMethods {
                   ExecutionPayloadEnvelopesByRangeRequestMessage, SignedExecutionPayloadEnvelope>>
           executionPayloadEnvelopesByRange,
       final Eth2RpcMethod<EmptyMessage, MetadataMessage> getMetadata,
-      final Eth2RpcMethod<PingMessage, PingMessage> ping) {
+      final Eth2RpcMethod<PingMessage, PingMessage> ping,
+      final Optional<Eth2RpcMethod<EmptyMessage, LightClientFinalityUpdate>>
+          lightClientFinalityUpdate,
+      final Optional<Eth2RpcMethod<EmptyMessage, LightClientOptimisticUpdate>>
+          lightClientOptimisticUpdate) {
     this.status = status;
     this.goodBye = goodBye;
     this.beaconBlocksByRoot = beaconBlocksByRoot;
@@ -144,6 +158,8 @@ public class BeaconChainMethods {
     this.executionPayloadEnvelopesByRange = executionPayloadEnvelopesByRange;
     this.getMetadata = getMetadata;
     this.ping = ping;
+    this.lightClientFinalityUpdate = lightClientFinalityUpdate;
+    this.lightClientOptimisticUpdate = lightClientOptimisticUpdate;
     this.allMethods =
         new ArrayList<>(
             List.of(status, goodBye, beaconBlocksByRoot, beaconBlocksByRange, getMetadata, ping));
@@ -156,6 +172,9 @@ public class BeaconChainMethods {
     // Gloas
     executionPayloadEnvelopesByRoot.ifPresent(allMethods::add);
     executionPayloadEnvelopesByRange.ifPresent(allMethods::add);
+    // Light client (Altair+, only when the light client server is enabled)
+    lightClientFinalityUpdate.ifPresent(allMethods::add);
+    lightClientOptimisticUpdate.ifPresent(allMethods::add);
   }
 
   public static BeaconChainMethods create(
@@ -170,7 +189,8 @@ public class BeaconChainMethods {
       final MetadataMessagesFactory metadataMessagesFactory,
       final RpcEncoding rpcEncoding,
       final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor,
-      final DasReqRespLogger dasLogger) {
+      final DasReqRespLogger dasLogger,
+      final Optional<LightClientUpdateStore> lightClientUpdateStore) {
     return new BeaconChainMethods(
         createStatus(spec, asyncRunner, statusMessageFactory, peerLookup, rpcEncoding),
         createGoodBye(asyncRunner, metricsSystem, peerLookup, rpcEncoding),
@@ -226,7 +246,29 @@ public class BeaconChainMethods {
         createExecutionPayloadEnvelopesByRange(
             spec, asyncRunner, peerLookup, rpcEncoding, combinedChainDataClient, metricsSystem),
         createMetadata(spec, asyncRunner, metadataMessagesFactory, peerLookup, rpcEncoding),
-        createPing(asyncRunner, metadataMessagesFactory, peerLookup, rpcEncoding));
+        createPing(asyncRunner, metadataMessagesFactory, peerLookup, rpcEncoding),
+        createLightClientLatestUpdate(
+            spec,
+            asyncRunner,
+            peerLookup,
+            rpcEncoding,
+            recentChainData,
+            lightClientUpdateStore,
+            BeaconChainMethodIds.LIGHT_CLIENT_FINALITY_UPDATE,
+            ForkDigestPayloadContext.LIGHT_CLIENT_FINALITY_UPDATE,
+            LightClientUpdateStore::getLatestFinalityUpdate,
+            "light client finality update"),
+        createLightClientLatestUpdate(
+            spec,
+            asyncRunner,
+            peerLookup,
+            rpcEncoding,
+            recentChainData,
+            lightClientUpdateStore,
+            BeaconChainMethodIds.LIGHT_CLIENT_OPTIMISTIC_UPDATE,
+            ForkDigestPayloadContext.LIGHT_CLIENT_OPTIMISTIC_UPDATE,
+            LightClientUpdateStore::getLatestOptimisticUpdate,
+            "light client optimistic update"));
   }
 
   private static Eth2RpcMethod<StatusMessage, StatusMessage> createStatus(
@@ -746,6 +788,40 @@ public class BeaconChainMethods {
         peerLookup);
   }
 
+  private static <T extends SszData>
+      Optional<Eth2RpcMethod<EmptyMessage, T>> createLightClientLatestUpdate(
+          final Spec spec,
+          final AsyncRunner asyncRunner,
+          final PeerLookup peerLookup,
+          final RpcEncoding rpcEncoding,
+          final RecentChainData recentChainData,
+          final Optional<LightClientUpdateStore> lightClientUpdateStore,
+          final String methodId,
+          final ForkDigestPayloadContext<T> payloadContext,
+          final Function<LightClientUpdateStore, Optional<T>> latestUpdate,
+          final String updateType) {
+    if (!spec.isMilestoneSupported(SpecMilestone.ALTAIR)) {
+      return Optional.empty();
+    }
+
+    final RpcContextCodec<Bytes4, T> forkDigestContextCodec =
+        RpcContextCodec.forkDigest(spec, recentChainData, payloadContext);
+
+    return lightClientUpdateStore.map(
+        store ->
+            new SingleProtocolEth2RpcMethod<EmptyMessage, T>(
+                asyncRunner,
+                methodId,
+                1,
+                rpcEncoding,
+                EmptyMessage.SSZ_SCHEMA,
+                true,
+                forkDigestContextCodec,
+                new LightClientLatestUpdateMessageHandler<>(
+                    updateType, () -> latestUpdate.apply(store)),
+                peerLookup));
+  }
+
   private static SpecConfigGloas getSpecConfigGloas(final Spec spec) {
     return SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig());
   }
@@ -810,5 +886,15 @@ public class BeaconChainMethods {
 
   public Eth2RpcMethod<PingMessage, PingMessage> ping() {
     return ping;
+  }
+
+  public Optional<Eth2RpcMethod<EmptyMessage, LightClientFinalityUpdate>>
+      lightClientFinalityUpdate() {
+    return lightClientFinalityUpdate;
+  }
+
+  public Optional<Eth2RpcMethod<EmptyMessage, LightClientOptimisticUpdate>>
+      lightClientOptimisticUpdate() {
+    return lightClientOptimisticUpdate;
   }
 }
