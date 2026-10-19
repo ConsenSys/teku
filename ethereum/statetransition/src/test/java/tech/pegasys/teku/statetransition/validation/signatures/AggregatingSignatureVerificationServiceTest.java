@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -549,9 +550,9 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_onlyOneWorkerGathersAtATime() throws Exception {
-    // The non-gathering worker waits up to GATHER_LOCK_TIMEOUT (1 s) for the lock, so keep the
-    // gather window short enough that the gatherer finishes well before that even on a slow box
-    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(100));
+    // A max batch size of 5 ends the gather as soon as the fifth task arrives, so the outcome does
+    // not depend on how quickly the tasks are submitted relative to the gather window
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofSeconds(10), 5);
     startService();
     executeValidVerify(0, 0);
 
@@ -564,15 +565,30 @@ public class AggregatingSignatureVerificationServiceTest {
         executeValidVerify(i, i);
       }
 
-      Waiter.waitFor(() -> assertThat(worker1.isDone() || worker2.isDone()).isTrue());
-      final Future<List<SignatureTask>> gatherer = worker1.isDone() ? worker1 : worker2;
-      final Future<List<SignatureTask>> other = worker1.isDone() ? worker2 : worker1;
-      // The gathering worker collected everything that arrived in its window and the other worker
-      // did not steal any of the tasks: it is still waiting for the next batch
+      Waiter.waitFor(
+          () ->
+              assertThat(hasCompletedWithTasks(worker1) || hasCompletedWithTasks(worker2))
+                  .isTrue());
+      final boolean worker1Gathered = hasCompletedWithTasks(worker1);
+      final Future<List<SignatureTask>> gatherer = worker1Gathered ? worker1 : worker2;
+      final Future<List<SignatureTask>> other = worker1Gathered ? worker2 : worker1;
+      // The gathering worker collected everything that arrived in its window. The other worker
+      // never took a task: it is either still waiting for the gather lock or, on a slow machine,
+      // gave up waiting for it empty-handed
       assertThat(gatherer.get()).hasSize(5);
-      assertThat(other).isNotDone();
+      if (other.isDone()) {
+        assertThat(other.get()).isEmpty();
+      }
     } finally {
       workers.shutdownNow();
+    }
+  }
+
+  private static boolean hasCompletedWithTasks(final Future<List<SignatureTask>> worker) {
+    try {
+      return worker.isDone() && !worker.get().isEmpty();
+    } catch (final InterruptedException | ExecutionException e) {
+      throw new RuntimeException(e);
     }
   }
 
