@@ -959,6 +959,34 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  public void batchVerifyGatherTimeout_shouldAcceptTheMaximum() {
+    final P2PConfig config =
+        getTekuConfigurationFromArguments("--Xp2p-batch-verify-signatures-gather-timeout-ms", "100")
+            .p2p();
+    assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(100));
+  }
+
+  @Test
+  public void batchVerifyGatherTimeout_shouldRejectValuesAboveTheMaximum() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-timeout-ms", "101"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis: 101 exceeds maximum: 100");
+  }
+
+  @Test
+  public void batchVerifyGatherTimeout_shouldRejectNegativeValues() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-timeout-ms", "-1"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis: -1");
+  }
+
+  @Test
   public void shouldDefaultBatchVerifyModeToGatherAndGroup() {
     final P2PConfig config = getTekuConfigurationFromArguments().p2p();
     assertThat(config.getBatchVerifyMode()).isEqualTo(SignatureVerificationMode.GATHER_AND_GROUP);

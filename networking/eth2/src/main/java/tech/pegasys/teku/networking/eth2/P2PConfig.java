@@ -57,6 +57,9 @@ public class P2PConfig {
   // In GATHER_AND_GROUP mode, after the first task of a batch arrives, keep gathering tasks for up
   // to this long (or until the batch is full) so that batches amortise the per-batch pairing cost
   public static final int DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS = 10;
+  // A batch that never fills up is held for the whole window, so keep the window well below the
+  // time budget of gossip validation
+  public static final int MAX_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS = 100;
   // it's not allowed to set less than requirement which is > 0, so it's safe value
   public static final int DEFAULT_CUSTODY_GROUP_COUNT_OVERRIDE = 0;
   public static final int DEFAULT_DAS_PUBLISH_WITHHOLD_COLUMNS_EVERY_SLOTS = -1;
@@ -606,6 +609,12 @@ public class P2PConfig {
         throw new InvalidConfigurationException(
             String.format(
                 "Invalid batchVerifyGatherTimeoutMillis: %d", batchVerifyGatherTimeoutMillis));
+      }
+      if (batchVerifyGatherTimeoutMillis > MAX_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS) {
+        throw new InvalidConfigurationException(
+            String.format(
+                "Invalid batchVerifyGatherTimeoutMillis: %d exceeds maximum: %d",
+                batchVerifyGatherTimeoutMillis, MAX_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS));
       }
       this.batchVerifyGatherTimeoutMillis = batchVerifyGatherTimeoutMillis;
       return this;

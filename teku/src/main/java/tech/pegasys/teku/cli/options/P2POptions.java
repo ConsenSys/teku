@@ -591,10 +591,12 @@ public class P2POptions {
   @Option(
       names = {"--Xp2p-batch-verify-signatures-gather-timeout-ms"},
       paramLabel = "<NUMBER>",
+      showDefaultValue = Visibility.ALWAYS,
       description =
           "After the first task of a signature verification batch arrives, keep gathering tasks for"
-              + " up to this many milliseconds so that batches are large enough to amortise the"
-              + " pairing cost. Applies only in GATHER_AND_GROUP mode and is ignored in LEGACY mode",
+              + " up to this many milliseconds (at most 100) so that batches are large enough to"
+              + " amortise the pairing cost. Applies only in GATHER_AND_GROUP mode and is ignored in"
+              + " LEGACY mode",
       arity = "1",
       hidden = true)
   private int batchVerifyGatherTimeoutMillis = P2PConfig.DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS;
