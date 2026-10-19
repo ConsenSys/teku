@@ -55,13 +55,6 @@ specrefs:
       - Attestation#gloas
       - IndexedAttestation#gloas
 
-      # Not implemented: heze
-      - ExecutionPayloadBid#heze
-      - SignedExecutionPayloadBid#heze
-      - InclusionListBits#heze
-      - InclusionListCommittee#heze
-      - SignedInclusionLists#heze
-
       # alpha.14 promoted pyspec List/Vector/BitList/BitVector/ByteList/Progressive*
       # type aliases to named ssz_objects. Teku models these as generic SSZ schema
       # type parameters (e.g. SszListSchema, SszVectorSchema, SszBitvectorSchema)
@@ -161,6 +154,7 @@ specrefs:
       - SignedBeaconBlocks#phase0
       - SignedBeaconBlocks#deneb
       - SignedExecutionPayloadEnvelopes#gloas
+      - SignedInclusionLists#heze
       - Slashings#phase0
       - StateRoots#phase0
       - SyncCommitteeBits#altair
@@ -197,12 +191,6 @@ specrefs:
       - Seen#fulu
       - Seen#gloas
       - Seen#heze
-
-      # Not implemented: heze
-      - GetInclusionListResponse#heze
-      - InclusionListStore#heze
-      - PayloadAttributes#heze
-      - InclusionListEntry#heze
 
     functions:
       # Unnecessary
@@ -289,27 +277,6 @@ specrefs:
       # Teku only has the underlying custody group/column index computation
       # (MiscHelpersFulu#computeCustodyColumnIndices), not the bitvector form (alpha.14)
       - get_custody_column_bits#gloas
-
-      # Not implemented: heze
-      - get_forkchoice_store#heze
-      - get_inclusion_list_bits#heze
-      - get_inclusion_list_committee#heze
-      - get_inclusion_list_committee_assignment#heze
-      - get_inclusion_list_signature#heze
-      - get_inclusion_list_store#heze
-      - get_inclusion_list_transactions#heze
-      - is_inclusion_list_bits_inclusive#heze
-      - is_payload_inclusion_list_satisfied#heze
-      - is_valid_inclusion_list_signature#heze
-      - on_execution_payload_envelope#heze
-      - on_inclusion_list#heze
-      - prepare_execution_payload#heze
-      - process_inclusion_list#heze
-      - record_payload_inclusion_list_satisfaction#heze
-      - should_extend_payload#heze
-      - get_inclusion_list_due_ms#heze
-      - get_signed_inclusion_list#heze
-      - validate_execution_payload_bid_gossip#heze
 
     presets:
       # Not implemented yet: EIP-7688 progressive SSZ sizing work

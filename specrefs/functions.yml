@@ -4536,6 +4536,42 @@
         )
     </spec>
 
+- name: get_forkchoice_store#heze
+  sources:
+    - file: storage/src/main/java/tech/pegasys/teku/storage/store/StoreBuilder.java
+      search: public static OnDiskStoreData forkChoiceStoreBuilder(
+  spec: |
+    <spec fn="get_forkchoice_store" fork="heze" hash="72744fcb">
+    def get_forkchoice_store(anchor_state: BeaconState, anchor_block: BeaconBlock) -> Store:
+        assert anchor_block.state_root == hash_tree_root(anchor_state)
+        anchor_root = hash_tree_root(anchor_block)
+        anchor_epoch = get_current_epoch(anchor_state)
+        justified_checkpoint = Checkpoint(epoch=anchor_epoch, root=anchor_root)
+        finalized_checkpoint = Checkpoint(epoch=anchor_epoch, root=anchor_root)
+        genesis_time_ms = seconds_to_milliseconds(anchor_state.genesis_time)
+        return Store(
+            time_ms=compute_time_at_slot_ms(genesis_time_ms, anchor_state.slot),
+            genesis_time_ms=genesis_time_ms,
+            justified_checkpoint=justified_checkpoint,
+            finalized_checkpoint=finalized_checkpoint,
+            unrealized_justified_checkpoint=justified_checkpoint,
+            unrealized_finalized_checkpoint=finalized_checkpoint,
+            proposer_boost_root=Root(),
+            equivocating_indices=set(),
+            blocks={anchor_root: anchor_block.copy()},
+            block_states={anchor_root: anchor_state.copy()},
+            block_timeliness={anchor_root: [True, True]},
+            checkpoint_states={justified_checkpoint: anchor_state.copy()},
+            latest_messages={},
+            unrealized_justifications={anchor_root: justified_checkpoint},
+            payloads={},
+            payload_timeliness_vote={anchor_root: [None] * PTC_SIZE},
+            payload_data_availability_vote={anchor_root: [None] * PTC_SIZE},
+            # [New in Heze:EIP7805]
+            payload_inclusion_list_satisfaction={},
+        )
+    </spec>
+
 - name: get_head#phase0
   sources:
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceStrategy.java
@@ -4740,7 +4776,9 @@
     </spec>
 
 - name: get_inclusion_list_bits#heze
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/forkchoice/InclusionListStore.java
+      search: public SszBitvector getInclusionListBits(
   spec: |
     <spec fn="get_inclusion_list_bits" fork="heze" hash="ebdce3b7">
     def get_inclusion_list_bits(
@@ -4767,6 +4805,126 @@
             validator_indices.append(validator_index)
 
         return InclusionListBits(data=[index in validator_indices for index in committee])
+    </spec>
+
+- name: get_inclusion_list_committee#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/helpers/BeaconStateAccessorsHeze.java
+      search: public IntList getInclusionListCommittee(
+  spec: |
+    <spec fn="get_inclusion_list_committee" fork="heze" hash="6c0625d9">
+    def get_inclusion_list_committee(state: BeaconState, slot: Slot) -> InclusionListCommittee:
+        """
+        Get the inclusion list committee for the given ``slot``.
+        """
+        epoch = compute_epoch_at_slot(slot)
+        indices: list[ValidatorIndex] = []
+        # Concatenate all committees for this slot in order
+        committees_per_slot = get_committee_count_per_slot(state, epoch)
+        for i in range(committees_per_slot):
+            committee = get_beacon_committee(state, slot, CommitteeIndex(i))
+            indices.extend(committee)
+        return InclusionListCommittee(
+            data=[indices[index % len(indices)] for index in range(INCLUSION_LIST_COMMITTEE_SIZE)]
+        )
+    </spec>
+
+- name: get_inclusion_list_committee_assignment#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/util/InclusionListUtil.java
+      search: public Int2ObjectMap<UInt64> getValidatorIndexToSlotAssignmentMap(
+  spec: |
+    <spec fn="get_inclusion_list_committee_assignment" fork="heze" hash="338b0ead">
+    def get_inclusion_list_committee_assignment(
+        state: BeaconState, epoch: Epoch, validator_index: ValidatorIndex
+    ) -> Slot | None:
+        """
+        Returns the slot during the requested epoch in which the validator with
+        index ``validator_index`` is a member of the inclusion list committee.
+        Returns None if no assignment is found.
+        """
+        next_epoch = get_current_epoch(state) + 1
+        assert epoch <= next_epoch
+
+        start_slot = compute_start_slot_at_epoch(epoch)
+        for slot in range(start_slot, start_slot + SLOTS_PER_EPOCH):
+            if validator_index in get_inclusion_list_committee(state, Slot(slot)):
+                return Slot(slot)
+        return None
+    </spec>
+
+- name: get_inclusion_list_due_ms#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/Spec.java
+      search: public Optional<Integer> getInclusionListDueMillis(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/util/ForkChoiceUtilHeze.java
+      search: public Optional<Integer> getInclusionListDueMillis(
+  spec: |
+    <spec fn="get_inclusion_list_due_ms" fork="heze" hash="48bbb794">
+    def get_inclusion_list_due_ms() -> Uint64:
+        return get_slot_component_duration_ms(INCLUSION_LIST_DUE_BPS)
+    </spec>
+
+- name: get_inclusion_list_signature#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/signatures/LocalSigner.java
+      search: public SafeFuture<BLSSignature> signInclusionList(
+  spec: |
+    <spec fn="get_inclusion_list_signature" fork="heze" hash="8d9fc0d7">
+    def get_inclusion_list_signature(
+        state: BeaconState, inclusion_list: InclusionList, privkey: int
+    ) -> BLSSignature:
+        domain = compute_domain(
+            DOMAIN_INCLUSION_LIST_COMMITTEE,
+            compute_fork_version(compute_epoch_at_slot(inclusion_list.slot)),
+            state.genesis_validators_root,
+        )
+        signing_root = compute_signing_root(inclusion_list, domain)
+        return bls.Sign(privkey, signing_root)
+    </spec>
+
+- name: get_inclusion_list_store#heze
+  sources:
+    - file: services/beaconchain/src/main/java/tech/pegasys/teku/services/beaconchain/BeaconChainController.java
+      search: new InclusionListStore(
+  spec: |
+    <spec fn="get_inclusion_list_store" fork="heze" hash="73075f19">
+    def get_inclusion_list_store() -> InclusionListStore:
+        # `cached_or_new_inclusion_list_store` is implementation and context dependent.
+        # It returns the cached `InclusionListStore`; if none exists,
+        # it initializes a new instance, caches it and returns it.
+        inclusion_list_store = cached_or_new_inclusion_list_store()
+
+        return inclusion_list_store
+    </spec>
+
+- name: get_inclusion_list_transactions#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/forkchoice/InclusionListStore.java
+      search: public List<Bytes> getInclusionListTransactions(
+  spec: |
+    <spec fn="get_inclusion_list_transactions" fork="heze" hash="18378c2a">
+    def get_inclusion_list_transactions(
+        store: InclusionListStore, slot: Slot, dependent_root: Root, only_timely: bool = True
+    ) -> Sequence[Transaction]:
+        key = (slot, dependent_root)
+        inclusion_lists = store.inclusion_lists[key]
+        equivocators = store.equivocators[key]
+
+        transactions: list[Transaction] = []
+        for validator_index, inclusion_list in inclusion_lists.items():
+            # Ignore inclusion lists from equivocators
+            if validator_index in equivocators:
+                continue
+
+            # Ignore untimely inclusion lists if only timely ones are requested
+            if only_timely and not inclusion_list.timely:
+                continue
+
+            transactions.extend(inclusion_list.signed_inclusion_list.message.transactions)
+
+        # Deduplicate inclusion list transactions. Order does not need to be preserved.
+        return list(set(transactions))
     </spec>
 
 - name: get_index_for_new_builder#gloas
@@ -5911,7 +6069,11 @@
     </spec>
 
 - name: get_signed_inclusion_list#heze
-  sources: []
+  sources:
+    - file: beacon/validator/src/main/java/tech/pegasys/teku/validator/coordinator/InclusionListFactory.java
+      search: public SafeFuture<Optional<InclusionList>> createInclusionList(
+    - file: validator/client/src/main/java/tech/pegasys/teku/validator/client/duties/inclusionlists/InclusionListProductionDuty.java
+      search: private SignedInclusionList createSignedInclusionList(
   spec: |
     <spec fn="get_signed_inclusion_list" fork="heze" hash="138553a7">
     def get_signed_inclusion_list(
@@ -7675,7 +7837,11 @@
     </spec>
 
 - name: is_inclusion_list_bits_inclusive#heze
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/ExecutionPayloadBidGossipValidator.java
+      search: "[IGNORE] The bid's inclusion list bits is inclusive"
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/execution/DefaultExecutionPayloadBidManager.java
+      search: private boolean isInclusive(
   spec: |
     <spec fn="is_inclusion_list_bits_inclusive" fork="heze" hash="ea1a888b">
     def is_inclusion_list_bits_inclusive(
@@ -7897,6 +8063,28 @@
         """
         slot_time_ms = compute_time_at_slot_ms(store.genesis_time_ms, slot)
         return current_time_ms > slot_time_ms + MAXIMUM_GOSSIP_CLOCK_DISPARITY
+    </spec>
+
+- name: is_payload_inclusion_list_satisfied#heze
+  sources:
+    - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceStrategy.java
+      search: public boolean satisfiesInclusionList(
+  spec: |
+    <spec fn="is_payload_inclusion_list_satisfied" fork="heze" hash="2f119ca9">
+    def is_payload_inclusion_list_satisfied(store: Store, root: Root) -> bool:
+        """
+        Return whether the execution payload for the beacon block with root ``root``
+        satisfied the inclusion list constraints, and was locally determined to be available.
+        """
+        # The beacon block root must be known
+        assert root in store.payload_inclusion_list_satisfaction
+
+        # If the payload is not locally available, the payload
+        # is not considered to satisfy the inclusion list constraints
+        if not is_payload_verified(store, root):
+            return False
+
+        return store.payload_inclusion_list_satisfaction[root]
     </spec>
 
 - name: is_payload_verified#gloas
@@ -8142,6 +8330,30 @@
         if len(get_active_validator_indices(state, GENESIS_EPOCH)) < MIN_GENESIS_ACTIVE_VALIDATOR_COUNT:
             return False
         return True
+    </spec>
+
+- name: is_valid_inclusion_list_signature#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/util/InclusionListUtil.java
+      search: public SafeFuture<Boolean> isValidInclusionListSignature(
+  spec: |
+    <spec fn="is_valid_inclusion_list_signature" fork="heze" hash="ab8ab841">
+    def is_valid_inclusion_list_signature(
+        state: BeaconState, signed_inclusion_list: SignedInclusionList
+    ) -> bool:
+        """
+        Check if ``signed_inclusion_list`` has a valid signature.
+        """
+        message = signed_inclusion_list.message
+        index = message.validator_index
+        pubkey = state.validators[index].pubkey
+        domain = compute_domain(
+            DOMAIN_INCLUSION_LIST_COMMITTEE,
+            compute_fork_version(compute_epoch_at_slot(message.slot)),
+            state.genesis_validators_root,
+        )
+        signing_root = compute_signing_root(message, domain)
+        return bls.Verify(pubkey, signing_root, signed_inclusion_list.signature)
     </spec>
 
 - name: is_valid_indexed_attestation#phase0
@@ -9015,6 +9227,44 @@
         store.payloads[envelope.beacon_block_root] = envelope
     </spec>
 
+- name: on_execution_payload_envelope#heze
+  sources:
+    - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceModelGloas.java
+      search: public void onExecutionPayload(
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ForkChoice.java
+      search: private void recordPayloadInclusionListSatisfaction(
+  spec: |
+    <spec fn="on_execution_payload_envelope" fork="heze" hash="afd9bdaf">
+    def on_execution_payload_envelope(
+        store: Store, signed_envelope: SignedExecutionPayloadEnvelope
+    ) -> None:
+        """
+        Run ``on_execution_payload_envelope`` upon receiving a new execution payload envelope.
+        """
+        envelope = signed_envelope.message
+        # The corresponding beacon block root needs to be known
+        assert envelope.beacon_block_root in store.block_states
+
+        # Check if blob data is available
+        # If not, this payload MAY be queued and subsequently considered when blob data becomes available
+        assert is_data_available(envelope.beacon_block_root)
+
+        state = store.block_states[envelope.beacon_block_root]
+
+        # Verify the execution payload envelope
+        verify_execution_payload_envelope(state, signed_envelope, EXECUTION_ENGINE)
+
+        # [New in Heze:EIP7805]
+        # Check if this payload satisfies the inclusion list constraints
+        # If not, add this payload to the store as inclusion list constraints unsatisfied
+        record_payload_inclusion_list_satisfaction(
+            store, envelope.beacon_block_root, envelope.payload, EXECUTION_ENGINE
+        )
+
+        # Add execution payload envelope to the store
+        store.payloads[envelope.beacon_block_root] = envelope
+    </spec>
+
 - name: on_fast_confirmation#phase0
   sources:
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationTracker.java
@@ -9024,6 +9274,64 @@
     def on_fast_confirmation(fcr_store: FastConfirmationStore) -> None:
         update_fast_confirmation_variables(fcr_store)
         fcr_store.confirmed_root = get_latest_confirmed(fcr_store)
+    </spec>
+
+- name: on_inclusion_list#heze
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ForkChoice.java
+      search: public SafeFuture<InclusionListImportResult> onInclusionList(
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/SignedInclusionListValidator.java
+      search: public SafeFuture<InternalValidationResult> validate(
+  spec: |
+    <spec fn="on_inclusion_list" fork="heze" hash="7bb9eff2">
+    def on_inclusion_list(store: Store, signed_inclusion_list: SignedInclusionList) -> None:
+        """
+        Run ``on_inclusion_list`` upon receiving a new inclusion list.
+        """
+        inclusion_list = signed_inclusion_list.message
+        current_slot = get_current_slot(store)
+
+        # The slot must be within the retention window
+        assert inclusion_list.slot <= current_slot
+        assert inclusion_list.slot + MIN_SLOTS_FOR_INCLUSION_LISTS_REQUESTS >= current_slot
+
+        # The transactions must be non-empty and not exceed the maximum size
+        transactions_size = sum(len(transaction) for transaction in inclusion_list.transactions)
+        assert transactions_size > 0
+        assert transactions_size <= MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST
+
+        # Every transaction must be non-empty
+        assert all(len(transaction) > 0 for transaction in inclusion_list.transactions)
+
+        # The dependent block must be known
+        assert inclusion_list.dependent_root in store.blocks
+        assert inclusion_list.dependent_root in store.block_states
+
+        # The dependent block's slot must not be after the shuffling dependent slot
+        epoch = compute_epoch_at_slot(inclusion_list.slot)
+        dependent_slot = compute_shuffling_dependent_slot(epoch)
+        assert store.blocks[inclusion_list.dependent_root].slot <= dependent_slot
+
+        # The dependent block must be a possible dependent block for the committee lookahead
+        assert is_valid_dependent_root(store, inclusion_list.dependent_root, dependent_slot)
+
+        # Verify the validator is in the inclusion list committee
+        state = store.block_states[inclusion_list.dependent_root].copy()
+        lookahead_start_slot = compute_shuffling_lookahead_start_slot(epoch)
+        if state.slot < lookahead_start_slot:
+            process_slots(state, lookahead_start_slot)
+        committee = get_inclusion_list_committee(state, inclusion_list.slot)
+        assert inclusion_list.validator_index in committee
+
+        # Verify the signature
+        assert is_valid_inclusion_list_signature(state, signed_inclusion_list)
+
+        # The inclusion list is timely if it arrives in its slot before the deadline
+        is_current_slot = inclusion_list.slot == current_slot
+        is_timely = is_current_slot and get_time_into_slot_ms(store) < get_inclusion_list_due_ms()
+
+        # Process the inclusion list
+        process_inclusion_list(get_inclusion_list_store(), signed_inclusion_list, is_timely)
     </spec>
 
 - name: on_payload_attestation_message#gloas
@@ -9408,6 +9716,63 @@
             finalized_block_hash=finalized_block_hash,
             payload_attributes=payload_attributes,
             # [New in Gloas:EIP8070]
+            custody_columns=None,
+        )
+    </spec>
+
+- name: prepare_execution_payload#heze
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ProposersDataManager.java
+      search: private SafeFuture<Optional<PayloadBuildingAttributes>> calculatePayloadBuildingAttributes(
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ProposersDataManager.java
+      search: private List<Bytes> getInclusionListTransactions(
+  spec: |
+    <spec fn="prepare_execution_payload" fork="heze" hash="5c63c4a8">
+    def prepare_execution_payload(
+        store: Store,
+        head: ForkChoiceNode,
+        state: BeaconState,
+        safe_block_hash: Hash32,
+        finalized_block_hash: Hash32,
+        suggested_fee_recipient: ExecutionAddress,
+        target_gas_limit: Uint64,
+        execution_engine: ExecutionEngine,
+    ) -> PayloadId | None:
+        parent_bid = state.latest_execution_payload_bid
+        if should_build_on_full(store, head, get_current_slot(store)):
+            envelope = store.payloads[head.root]
+            # Make a copy of the state to avoid mutability issues
+            state = state.copy()
+            # Apply parent payload before computing withdrawals
+            apply_parent_execution_payload(state, envelope.execution_requests)
+            withdrawals = get_expected_withdrawals(state).withdrawals
+            head_block_hash = parent_bid.block_hash
+        else:
+            withdrawals = state.payload_expected_withdrawals
+            head_block_hash = parent_bid.parent_block_hash
+
+        # Set the forkchoice head and initiate the payload build process
+        payload_attributes = PayloadAttributes(
+            timestamp=compute_time_at_slot(state.genesis_time, state.slot),
+            prev_randao=get_randao_mix(state, get_current_epoch(state)),
+            suggested_fee_recipient=suggested_fee_recipient,
+            withdrawals=withdrawals,
+            parent_beacon_block_root=hash_tree_root(state.latest_block_header),
+            slot_number=state.slot,
+            target_gas_limit=target_gas_limit,
+            # [New in Heze:EIP7805]
+            inclusion_list_transactions=get_inclusion_list_transactions(
+                get_inclusion_list_store(),
+                state.slot - 1,
+                get_shuffling_dependent_root(store, head.root, compute_epoch_at_slot(state.slot - 1)),
+                only_timely=False,
+            ),
+        )
+        return execution_engine.notify_forkchoice_updated(
+            head_block_hash=head_block_hash,
+            safe_block_hash=safe_block_hash,
+            finalized_block_hash=finalized_block_hash,
+            payload_attributes=payload_attributes,
             custody_columns=None,
         )
     </spec>
@@ -10795,6 +11160,36 @@
                 state.inactivity_scores[index] = saturating_sub(
                     state.inactivity_scores[index], INACTIVITY_SCORE_RECOVERY_RATE
                 )
+    </spec>
+
+- name: process_inclusion_list#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/forkchoice/InclusionListStore.java
+      search: public void processInclusionList(
+  spec: |
+    <spec fn="process_inclusion_list" fork="heze" hash="a441f361">
+    def process_inclusion_list(
+        store: InclusionListStore, signed_inclusion_list: SignedInclusionList, timely: bool
+    ) -> None:
+        inclusion_list = signed_inclusion_list.message
+        validator_index = inclusion_list.validator_index
+        key = (inclusion_list.slot, inclusion_list.dependent_root)
+
+        if validator_index in store.inclusion_lists[key]:
+            # Mark the validator as an equivocator if it published a different inclusion list
+            stored_entry = store.inclusion_lists[key][validator_index]
+            stored_inclusion_list = stored_entry.signed_inclusion_list.message
+            if stored_inclusion_list != inclusion_list:
+                store.equivocators[key].add(validator_index)
+
+            # Ignore an inclusion list that has already been processed
+            return
+
+        # Store the signed inclusion list and its timeliness
+        store.inclusion_lists[key][validator_index] = InclusionListEntry(
+            signed_inclusion_list=signed_inclusion_list,
+            timely=timely,
+        )
     </spec>
 
 - name: process_justification_and_finalization#phase0
@@ -12219,6 +12614,31 @@
         ]
     </spec>
 
+- name: record_payload_inclusion_list_satisfaction#heze
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ForkChoice.java
+      search: private void recordPayloadInclusionListSatisfaction(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/util/ForkChoiceUtilHeze.java
+      search: public Optional<List<InclusionList>> getInclusionListsForPayloadValidation(
+  spec: |
+    <spec fn="record_payload_inclusion_list_satisfaction" fork="heze" hash="c05f1180">
+    def record_payload_inclusion_list_satisfaction(
+        store: Store,
+        root: Root,
+        payload: ExecutionPayload,
+        execution_engine: ExecutionEngine,
+    ) -> None:
+        slot = store.blocks[root].slot - 1
+        dependent_root = get_shuffling_dependent_root(store, root, compute_epoch_at_slot(slot))
+        inclusion_list_transactions = get_inclusion_list_transactions(
+            get_inclusion_list_store(), slot, dependent_root, only_timely=True
+        )
+        is_inclusion_list_satisfied = execution_engine.is_inclusion_list_satisfied(
+            payload, inclusion_list_transactions
+        )
+        store.payload_inclusion_list_satisfaction[root] = is_inclusion_list_satisfied
+    </spec>
+
 - name: recover_matrix#fulu
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/helpers/MiscHelpersFulu.java
@@ -12395,6 +12815,30 @@
     def should_extend_payload(store: Store, root: Root) -> bool:
         assert store.blocks[root].slot + 1 == get_current_slot(store)
         if not is_payload_verified(store, root):
+            return False
+        proposer_root = store.proposer_boost_root
+        payload_is_timely = payload_timeliness(store, root, timely=True)
+        payload_data_is_available = payload_data_availability(store, root, available=True)
+        return (
+            (payload_is_timely and payload_data_is_available)
+            or proposer_root == Root()
+            or store.blocks[proposer_root].parent_root != root
+            or is_parent_node_full(store, store.blocks[proposer_root])
+        )
+    </spec>
+
+- name: should_extend_payload#heze
+  sources:
+    - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceModelGloas.java
+      search: private boolean shouldExtendPayload(
+  spec: |
+    <spec fn="should_extend_payload" fork="heze" hash="323b3263">
+    def should_extend_payload(store: Store, root: Root) -> bool:
+        assert store.blocks[root].slot + 1 == get_current_slot(store)
+        if not is_payload_verified(store, root):
+            return False
+        # [New in Heze:EIP7805]
+        if not is_payload_inclusion_list_satisfied(store, root):
             return False
         proposer_root = store.proposer_boost_root
         payload_is_timely = payload_timeliness(store, root, timely=True)
@@ -16083,7 +16527,9 @@
     </spec>
 
 - name: validate_execution_payload_bid_gossip#heze
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/ExecutionPayloadBidGossipValidator.java
+      search: public SafeFuture<InternalValidationResult> validate(
   spec: |
     <spec fn="validate_execution_payload_bid_gossip" fork="heze" hash="ee7d1f84">
     def validate_execution_payload_bid_gossip(
