@@ -22,8 +22,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.impl.BlsException;
 
@@ -32,7 +30,6 @@ import tech.pegasys.teku.bls.impl.BlsException;
  * AttestationData), so that each distinct message is hashed to G2 and paired only once.
  */
 public final class SameMessageBatchVerifier {
-  private static final Logger LOG = LogManager.getLogger();
 
   /**
    * Signatures whose message is unique are prepared this many at a time in one blst pairing
@@ -56,7 +53,6 @@ public final class SameMessageBatchVerifier {
       final List<BLSSignature> signatures,
       final boolean parallel) {
     if (BLSConstants.verificationDisabled) {
-      LOG.warn("Skipping bls verification.");
       return true;
     }
     try {
