@@ -58,6 +58,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnsByRootIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.RpcRequest;
@@ -427,6 +428,14 @@ public class RespondingEth2Peer implements Eth2Peer {
 
   @Override
   public SafeFuture<LightClientOptimisticUpdate> requestLightClientOptimisticUpdate() {
+    return SafeFuture.failedFuture(new UnsupportedOperationException("Not supported"));
+  }
+
+  @Override
+  public SafeFuture<Void> requestLightClientUpdatesByRange(
+      final UInt64 startPeriod,
+      final UInt64 count,
+      final RpcResponseListener<LightClientUpdate> listener) {
     return SafeFuture.failedFuture(new UnsupportedOperationException("Not supported"));
   }
 

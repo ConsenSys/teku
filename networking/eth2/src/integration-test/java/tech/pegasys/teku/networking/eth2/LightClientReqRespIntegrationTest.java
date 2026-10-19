@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static tech.pegasys.teku.infrastructure.async.Waiter.waitFor;
 import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.RESOURCE_UNAVAILABLE;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.tuweni.bytes.Bytes32;
@@ -32,10 +33,13 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.teku.networking.p2p.rpc.RpcResponseListener;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 
@@ -58,7 +62,6 @@ public class LightClientReqRespIntegrationTest {
             networkFactory,
             validatorKeys,
             b -> b.lightClientUpdateStore(serverStore));
-    // The client needs the methods registered too, so it gets its own (empty) store
     final NodeManager client =
         NodeManager.create(
             spec,
@@ -106,6 +109,47 @@ public class LightClientReqRespIntegrationTest {
   @Test
   public void shouldReturnResourceUnavailableWhenNoOptimisticUpdate() {
     assertResourceUnavailable(serverPeer.requestLightClientOptimisticUpdate());
+  }
+
+  @Test
+  public void shouldReturnConsecutiveBestUpdatesByRange() throws Exception {
+    final LightClientUpdate period0 = updateInPeriod(0);
+    final LightClientUpdate period1 = updateInPeriod(1);
+    serverStore.addUpdate(period0, Bytes32.ZERO, (slot, root) -> true);
+    serverStore.addUpdate(period1, Bytes32.ZERO, (slot, root) -> true);
+
+    final List<LightClientUpdate> received = new ArrayList<>();
+    serverPeer
+        .requestLightClientUpdatesByRange(
+            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add))
+        .get(10, TimeUnit.SECONDS);
+
+    assertThat(received).containsExactly(period0, period1);
+  }
+
+  @Test
+  public void shouldReturnNoUpdatesByRangeWhenNoneKnown() throws Exception {
+    final List<LightClientUpdate> received = new ArrayList<>();
+    serverPeer
+        .requestLightClientUpdatesByRange(
+            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add))
+        .get(10, TimeUnit.SECONDS);
+
+    assertThat(received).isEmpty();
+  }
+
+  private LightClientUpdate updateInPeriod(final int period) {
+    final long slotsPerPeriod =
+        (long)
+                SpecConfigAltair.required(spec.getGenesisSpecConfig())
+                    .getEpochsPerSyncCommitteePeriod()
+            * spec.getGenesisSpecConfig().getSlotsPerEpoch();
+    final UInt64 attestedSlot = UInt64.valueOf(period * slotsPerPeriod + 1);
+    return dataStructureUtil
+        .createRandomLightClientUpdateBuilder(attestedSlot)
+        .attestedSlot(attestedSlot)
+        .signatureSlot(attestedSlot.plus(1))
+        .build();
   }
 
   private static void assertResourceUnavailable(final SafeFuture<?> future) {

@@ -38,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnsByRootIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.RpcRequest;
@@ -135,6 +136,9 @@ public interface Eth2Peer extends Peer, SyncSource {
   SafeFuture<LightClientFinalityUpdate> requestLightClientFinalityUpdate();
 
   SafeFuture<LightClientOptimisticUpdate> requestLightClientOptimisticUpdate();
+
+  SafeFuture<Void> requestLightClientUpdatesByRange(
+      UInt64 startPeriod, UInt64 count, RpcResponseListener<LightClientUpdate> listener);
 
   default <I extends RpcRequest, O extends SszData> SafeFuture<O> requestSingleItem(
       final Eth2RpcMethod<I, O> method, final I request) {
