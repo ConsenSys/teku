@@ -549,7 +549,9 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_onlyOneWorkerGathersAtATime() throws Exception {
-    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(500));
+    // The non-gathering worker waits up to GATHER_LOCK_TIMEOUT (1 s) for the lock, so keep the
+    // gather window short enough that the gatherer finishes well before that even on a slow box
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(100));
     startService();
     executeValidVerify(0, 0);
 
