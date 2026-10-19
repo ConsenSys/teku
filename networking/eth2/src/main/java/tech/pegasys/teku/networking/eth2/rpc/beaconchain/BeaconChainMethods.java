@@ -35,6 +35,7 @@ import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidec
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.ExecutionPayloadEnvelopesByRangeMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.ExecutionPayloadEnvelopesByRootMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.GoodbyeMessageHandler;
+import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.LightClientBootstrapMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.LightClientLatestUpdateMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.LightClientUpdatesByRangeMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.MetadataMessageHandler;
@@ -56,6 +57,7 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -75,6 +77,7 @@ import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayl
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayloadEnvelopesByRootRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayloadEnvelopesByRootRequestMessage.ExecutionPayloadEnvelopesByRootRequestMessageSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.GoodbyeMessage;
+import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientBootstrapRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientUpdatesByRangeRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.PingMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.metadata.MetadataMessage;
@@ -121,6 +124,8 @@ public class BeaconChainMethods {
       lightClientOptimisticUpdate;
   private final Optional<Eth2RpcMethod<LightClientUpdatesByRangeRequestMessage, LightClientUpdate>>
       lightClientUpdatesByRange;
+  private final Optional<Eth2RpcMethod<LightClientBootstrapRequestMessage, LightClientBootstrap>>
+      lightClientBootstrap;
 
   private final Collection<RpcMethod<?, ?, ?>> allMethods;
 
@@ -152,7 +157,9 @@ public class BeaconChainMethods {
       final Optional<Eth2RpcMethod<EmptyMessage, LightClientOptimisticUpdate>>
           lightClientOptimisticUpdate,
       final Optional<Eth2RpcMethod<LightClientUpdatesByRangeRequestMessage, LightClientUpdate>>
-          lightClientUpdatesByRange) {
+          lightClientUpdatesByRange,
+      final Optional<Eth2RpcMethod<LightClientBootstrapRequestMessage, LightClientBootstrap>>
+          lightClientBootstrap) {
     this.status = status;
     this.goodBye = goodBye;
     this.beaconBlocksByRoot = beaconBlocksByRoot;
@@ -168,6 +175,7 @@ public class BeaconChainMethods {
     this.lightClientFinalityUpdate = lightClientFinalityUpdate;
     this.lightClientOptimisticUpdate = lightClientOptimisticUpdate;
     this.lightClientUpdatesByRange = lightClientUpdatesByRange;
+    this.lightClientBootstrap = lightClientBootstrap;
     this.allMethods =
         new ArrayList<>(
             List.of(status, goodBye, beaconBlocksByRoot, beaconBlocksByRange, getMetadata, ping));
@@ -184,6 +192,7 @@ public class BeaconChainMethods {
     lightClientFinalityUpdate.ifPresent(allMethods::add);
     lightClientOptimisticUpdate.ifPresent(allMethods::add);
     lightClientUpdatesByRange.ifPresent(allMethods::add);
+    lightClientBootstrap.ifPresent(allMethods::add);
   }
 
   public static BeaconChainMethods create(
@@ -279,7 +288,15 @@ public class BeaconChainMethods {
             LightClientUpdateStore::getLatestOptimisticUpdate,
             "light client optimistic update"),
         createLightClientUpdatesByRange(
-            spec, asyncRunner, peerLookup, rpcEncoding, recentChainData, lightClientUpdateStore));
+            spec, asyncRunner, peerLookup, rpcEncoding, recentChainData, lightClientUpdateStore),
+        createLightClientBootstrap(
+            spec,
+            asyncRunner,
+            peerLookup,
+            rpcEncoding,
+            recentChainData,
+            combinedChainDataClient,
+            lightClientUpdateStore));
   }
 
   private static Eth2RpcMethod<StatusMessage, StatusMessage> createStatus(
@@ -864,6 +881,36 @@ public class BeaconChainMethods {
                 peerLookup));
   }
 
+  private static Optional<Eth2RpcMethod<LightClientBootstrapRequestMessage, LightClientBootstrap>>
+      createLightClientBootstrap(
+          final Spec spec,
+          final AsyncRunner asyncRunner,
+          final PeerLookup peerLookup,
+          final RpcEncoding rpcEncoding,
+          final RecentChainData recentChainData,
+          final CombinedChainDataClient combinedChainDataClient,
+          final Optional<LightClientUpdateStore> lightClientUpdateStore) {
+    if (!spec.isMilestoneSupported(SpecMilestone.ALTAIR) || lightClientUpdateStore.isEmpty()) {
+      return Optional.empty();
+    }
+
+    final RpcContextCodec<Bytes4, LightClientBootstrap> forkDigestContextCodec =
+        RpcContextCodec.forkDigest(
+            spec, recentChainData, ForkDigestPayloadContext.LIGHT_CLIENT_BOOTSTRAP);
+
+    return Optional.of(
+        new SingleProtocolEth2RpcMethod<>(
+            asyncRunner,
+            BeaconChainMethodIds.LIGHT_CLIENT_BOOTSTRAP,
+            1,
+            rpcEncoding,
+            LightClientBootstrapRequestMessage.SSZ_SCHEMA,
+            true,
+            forkDigestContextCodec,
+            new LightClientBootstrapMessageHandler(spec, combinedChainDataClient),
+            peerLookup));
+  }
+
   private static SpecConfigGloas getSpecConfigGloas(final Spec spec) {
     return SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig());
   }
@@ -943,5 +990,10 @@ public class BeaconChainMethods {
   public Optional<Eth2RpcMethod<LightClientUpdatesByRangeRequestMessage, LightClientUpdate>>
       lightClientUpdatesByRange() {
     return lightClientUpdatesByRange;
+  }
+
+  public Optional<Eth2RpcMethod<LightClientBootstrapRequestMessage, LightClientBootstrap>>
+      lightClientBootstrap() {
+    return lightClientBootstrap;
   }
 }

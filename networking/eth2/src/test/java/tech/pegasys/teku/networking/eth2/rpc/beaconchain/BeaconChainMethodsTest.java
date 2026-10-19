@@ -209,6 +209,7 @@ public class BeaconChainMethodsTest {
     assertThat(methods.lightClientFinalityUpdate()).isEmpty();
     assertThat(methods.lightClientOptimisticUpdate()).isEmpty();
     assertThat(methods.lightClientUpdatesByRange()).isEmpty();
+    assertThat(methods.lightClientBootstrap()).isEmpty();
   }
 
   @Test
@@ -220,6 +221,7 @@ public class BeaconChainMethodsTest {
     assertThat(methods.lightClientFinalityUpdate()).isEmpty();
     assertThat(methods.lightClientOptimisticUpdate()).isEmpty();
     assertThat(methods.lightClientUpdatesByRange()).isEmpty();
+    assertThat(methods.lightClientBootstrap()).isEmpty();
   }
 
   @Test
@@ -254,6 +256,19 @@ public class BeaconChainMethodsTest {
                 assertThat(method.getIds())
                     .containsExactly(
                         "/eth2/beacon_chain/req/light_client_updates_by_range/1/ssz_snappy"));
+  }
+
+  @Test
+  void shouldRegisterLightClientBootstrap() {
+    final Spec spec = TestSpecFactory.createMinimalAltair();
+    final BeaconChainMethods methods =
+        getMethods(spec, Optional.of(new LightClientUpdateStore(spec)));
+
+    assertThat(methods.lightClientBootstrap())
+        .hasValueSatisfying(
+            method ->
+                assertThat(method.getIds())
+                    .containsExactly("/eth2/beacon_chain/req/light_client_bootstrap/1/ssz_snappy"));
   }
 
   private BeaconChainMethods getMethods() {
