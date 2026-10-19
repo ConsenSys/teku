@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -77,9 +77,13 @@ public class DefaultBuilderConfigProvider implements BuilderConfigProvider, Vali
   @Override
   public SafeFuture<Optional<BuilderConfig>> getBuilderConfig(
       final Validator validator, final UInt64 slot) {
-    if (!isBuilderConfigRequired(slot)
-        || !proposerConfigPropertiesProvider.isReadyToProvideProperties()) {
+    if (!isBuilderConfigRequired(slot)) {
       return SafeFuture.completedFuture(Optional.empty());
+    }
+    // just in case initialization of ProposerConfigManager is not yet complete, we return
+    // non-biased builder config, but in practice this should never happen
+    if (!proposerConfigPropertiesProvider.isReadyToProvideProperties()) {
+      return SafeFuture.completedFuture(Optional.of(BuilderConfig.NO_OP));
     }
     final ProposerPubkeyAndSlot cacheKey =
         new ProposerPubkeyAndSlot(validator.getPublicKey(), slot);

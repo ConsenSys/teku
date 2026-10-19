@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -16,7 +16,6 @@ package tech.pegasys.teku.validator.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -89,12 +88,10 @@ class DefaultBuilderConfigProviderTest {
   }
 
   @Test
-  void shouldReturnEmptyIfProposerConfigPropertiesProviderIsNotReady() {
+  void shouldReturnNonBiasedBuilderConfigIfProposerConfigPropertiesProviderIsNotReady() {
     when(proposerConfigPropertiesProvider.isReadyToProvideProperties()).thenReturn(false);
     assertThat(provider.getBuilderConfig(validator, UInt64.ZERO))
-        .isCompletedWithValue(Optional.empty());
-
-    verify(proposerConfigPropertiesProvider, never()).resolveBuilderConfig(any());
+        .isCompletedWithValue(Optional.of(BuilderConfig.NO_OP));
   }
 
   @Test
