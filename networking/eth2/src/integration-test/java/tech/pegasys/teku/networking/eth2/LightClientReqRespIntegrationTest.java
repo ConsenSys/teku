@@ -37,6 +37,8 @@ import tech.pegasys.teku.networking.p2p.rpc.RpcResponseListener;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -51,11 +53,12 @@ public class LightClientReqRespIntegrationTest {
   private final Eth2P2PNetworkFactory networkFactory = new Eth2P2PNetworkFactory();
   private final LightClientUpdateStore serverStore = new LightClientUpdateStore(spec);
 
+  private NodeManager server;
   private Eth2Peer serverPeer;
 
   @BeforeEach
   public void setUp() throws Exception {
-    final NodeManager server =
+    server =
         NodeManager.create(
             spec,
             asyncRunner,
@@ -136,6 +139,24 @@ public class LightClientReqRespIntegrationTest {
         .get(10, TimeUnit.SECONDS);
 
     assertThat(received).isEmpty();
+  }
+
+  @Test
+  public void shouldReturnBootstrapForKnownBlock() throws Exception {
+    final SignedBlockAndState blockAndState = server.getChainUpdater().advanceChain(1);
+
+    final LightClientBootstrap bootstrap =
+        serverPeer.requestLightClientBootstrap(blockAndState.getRoot()).get(10, TimeUnit.SECONDS);
+
+    assertThat(bootstrap)
+        .isEqualTo(
+            spec.getLightClientUtilRequired(blockAndState.getSlot())
+                .createLightClientBootstrap(blockAndState.getState(), blockAndState.getBlock()));
+  }
+
+  @Test
+  public void shouldReturnResourceUnavailableForUnknownBootstrapBlock() {
+    assertResourceUnavailable(serverPeer.requestLightClientBootstrap(Bytes32.random()));
   }
 
   private LightClientUpdate updateInPeriod(final int period) {
