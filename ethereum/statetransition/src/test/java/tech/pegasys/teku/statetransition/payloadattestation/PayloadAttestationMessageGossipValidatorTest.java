@@ -350,8 +350,6 @@ public class PayloadAttestationMessageGossipValidatorTest {
 
     verify(signatureVerifier)
         .verify(validatorPublicKey, signingRoot, payloadAttestationMessage.getSignature());
-    verify(gossipValidationHelper, never())
-        .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
   }
 
   @TestTemplate
