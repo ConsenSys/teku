@@ -172,7 +172,7 @@ public class BeaconChainMethods {
     // Gloas
     executionPayloadEnvelopesByRoot.ifPresent(allMethods::add);
     executionPayloadEnvelopesByRange.ifPresent(allMethods::add);
-    // Light client (Altair+, only when the light client server is enabled)
+    // Light client
     lightClientFinalityUpdate.ifPresent(allMethods::add);
     lightClientOptimisticUpdate.ifPresent(allMethods::add);
   }
