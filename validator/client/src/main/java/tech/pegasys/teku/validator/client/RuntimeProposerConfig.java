@@ -128,6 +128,21 @@ public class RuntimeProposerConfig {
     storagePath.ifPresent(this::save);
   }
 
+  synchronized void updateBuilderConfig(
+      final BLSPublicKey publicKey, final BuilderConfig builderConfig) {
+    Preconditions.checkNotNull(builderConfig, "should delete rather than update to null");
+    final Optional<RuntimeConfig> currentConfig = getProposerConfig(publicKey);
+    if (currentConfig.isEmpty()) {
+      proposerConfigMap.put(
+          publicKey, new RuntimeConfigBuilder().builderConfig(Optional.of(builderConfig)).build());
+    } else {
+      RuntimeConfigBuilder configBuilder = new RuntimeConfigBuilder(currentConfig.get());
+      configBuilder.builderConfig(Optional.of(builderConfig));
+      updateEntry(publicKey, configBuilder.build());
+    }
+    storagePath.ifPresent(this::save);
+  }
+
   private synchronized void updateEntry(final BLSPublicKey publicKey, final RuntimeConfig config) {
     if (config.isEmpty()) {
       proposerConfigMap.remove(publicKey);
@@ -151,6 +166,16 @@ public class RuntimeProposerConfig {
     if (currentConfig.isPresent()) {
       RuntimeConfigBuilder builder = new RuntimeConfigBuilder(currentConfig.get());
       builder.gasLimit(Optional.empty());
+      updateEntry(publicKey, builder.build());
+      storagePath.ifPresent(this::save);
+    }
+  }
+
+  synchronized void deleteBuilderConfig(final BLSPublicKey publicKey) {
+    final Optional<RuntimeConfig> currentConfig = getProposerConfig(publicKey);
+    if (currentConfig.isPresent()) {
+      RuntimeConfigBuilder builder = new RuntimeConfigBuilder(currentConfig.get());
+      builder.builderConfig(Optional.empty());
       updateEntry(publicKey, builder.build());
       storagePath.ifPresent(this::save);
     }

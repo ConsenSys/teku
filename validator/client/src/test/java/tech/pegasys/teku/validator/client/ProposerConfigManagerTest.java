@@ -48,6 +48,7 @@ import tech.pegasys.teku.validator.client.ProposerConfig.RegistrationOverrides;
 import tech.pegasys.teku.validator.client.ResolvedBuilderConfig.ResolvedBuilderEntry;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 import tech.pegasys.teku.validator.client.proposerconfig.ProposerConfigProvider;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
 
 public class ProposerConfigManagerTest {
 
@@ -789,6 +790,62 @@ public class ProposerConfigManagerTest {
                 proposerConfigManager.setFeeRecipient(
                     validatorNotInConfig.getPublicKey(), Eth1Address.ZERO))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void setBuilderConfig_shouldUpdateRuntimeBuilderConfig(@TempDir final Path tempDir)
+      throws IOException {
+    final UInt64 minBid = dataStructureUtil.randomUInt64();
+    proposerWithRuntimeConfiguration(tempDir);
+
+    proposerConfigManager.setBuilderConfig(
+        validatorNotInConfig.getPublicKey(),
+        new BuilderConfig(Optional.of(minBid), Optional.empty(), Optional.empty()));
+
+    assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
+        .extracting(ResolvedBuilderConfig::minBid)
+        .isEqualTo(minBid);
+  }
+
+  @Test
+  void setBuilderConfig_shouldNotAcceptForConfiguredPubkey() throws IOException {
+    prepareConfigWithValidatorSpecificProperty(
+        Properties.BUILDER_MIN_BID, dataStructureUtil.randomUInt64());
+
+    assertThatThrownBy(
+            () ->
+                proposerConfigManager.setBuilderConfig(
+                    validatorInConfig.getPublicKey(),
+                    new BuilderConfig(Optional.empty(), Optional.empty(), Optional.empty())))
+        .isInstanceOf(SetBuilderConfigException.class)
+        .hasMessage("Cannot update builder config via api.");
+  }
+
+  @Test
+  void deleteBuilderConfig_shouldRemoveRuntimeBuilderConfig(@TempDir final Path tempDir)
+      throws IOException {
+    proposerWithRuntimeConfiguration(tempDir);
+    proposerConfigManager.setBuilderConfig(
+        validatorNotInConfig.getPublicKey(),
+        new BuilderConfig(
+            Optional.of(dataStructureUtil.randomUInt64()), Optional.empty(), Optional.empty()));
+
+    assertThat(proposerConfigManager.deleteBuilderConfig(validatorNotInConfig.getPublicKey()))
+        .isTrue();
+
+    // falls back to the validator client's own config
+    assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
+        .extracting(ResolvedBuilderConfig::minBid)
+        .isEqualTo(cliBuilderMinBid);
+  }
+
+  @Test
+  void deleteBuilderConfig_shouldReturnFalseIfConfigurationSetsBuilderConfig() throws IOException {
+    prepareConfigWithValidatorSpecificProperty(
+        Properties.BUILDER_MIN_BID, dataStructureUtil.randomUInt64());
+
+    assertThat(proposerConfigManager.deleteBuilderConfig(validatorInConfig.getPublicKey()))
+        .isFalse();
   }
 
   private void setUpWithGasLimitSchedule() throws IOException {

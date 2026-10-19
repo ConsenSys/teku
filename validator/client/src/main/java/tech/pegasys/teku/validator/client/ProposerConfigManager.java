@@ -151,6 +151,20 @@ public class ProposerConfigManager
     runtimeProposerConfig.updateGasLimit(publicKey, gasLimit);
   }
 
+  public void setBuilderConfig(
+      final BLSPublicKey publicKey,
+      final tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig builderConfig)
+      throws SetBuilderConfigException {
+    if (!isOwnedValidator(publicKey)) {
+      throw new SetBuilderConfigException(
+          "Validator public key not found when attempting to set builder config.");
+    }
+    if (isBuilderConfigInProposerConfig(publicKey)) {
+      throw new SetBuilderConfigException("Cannot update builder config via api.");
+    }
+    runtimeProposerConfig.updateBuilderConfig(publicKey, builderConfig);
+  }
+
   public boolean deleteFeeRecipient(final BLSPublicKey publicKey) {
     Optional<Eth1Address> maybeEth1Address = getFeeRecipientFromProposerConfig(publicKey);
     if (maybeEth1Address.isPresent()) {
@@ -166,6 +180,14 @@ public class ProposerConfigManager
       return false;
     }
     runtimeProposerConfig.deleteGasLimit(publicKey);
+    return true;
+  }
+
+  public boolean deleteBuilderConfig(final BLSPublicKey publicKey) {
+    if (isBuilderConfigInProposerConfig(publicKey)) {
+      return false;
+    }
+    runtimeProposerConfig.deleteBuilderConfig(publicKey);
     return true;
   }
 
@@ -372,6 +394,19 @@ public class ProposerConfigManager
         .get()
         .flatMap(config -> config.getConfigForPubKey(publicKey))
         .flatMap(Config::getGasLimit);
+  }
+
+  private boolean isBuilderConfigInProposerConfig(final BLSPublicKey publicKey) {
+    return maybeProposerConfig
+        .get()
+        .flatMap(config -> config.getConfigForPubKey(publicKey))
+        .flatMap(Config::getBuilder)
+        .filter(
+            builder ->
+                builder.getMinBid().isPresent()
+                    || builder.getBuilderBoostFactor().isPresent()
+                    || !builder.getUrls().isEmpty())
+        .isPresent();
   }
 
   public boolean isOwnedValidator(final BLSPublicKey publicKey) {
