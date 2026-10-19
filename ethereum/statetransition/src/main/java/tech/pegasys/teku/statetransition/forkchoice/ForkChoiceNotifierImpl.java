@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.forkchoice;
 
 import static com.google.common.base.Preconditions.checkState;
 
+import com.google.common.base.Throwables;
 import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -313,7 +314,11 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
         .finish(
             error ->
                 completePendingPayloadAttributesPreparationExceptionally(
-                    preparation, "failed: " + error.getMessage()));
+                    preparation,
+                    new IllegalStateException(
+                        preparationErrorMessage(
+                            preparation, "failed: " + Throwables.getRootCause(error).getMessage()),
+                        error)));
     return preparation.executionPayloadContext();
   }
 
@@ -401,11 +406,19 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
   private void completePendingPayloadAttributesPreparationExceptionally(
       final PendingPayloadAttributesPreparation preparation, final String reason) {
+    completePendingPayloadAttributesPreparationExceptionally(
+        preparation, new IllegalStateException(preparationErrorMessage(preparation, reason)));
+  }
+
+  private static String preparationErrorMessage(
+      final PendingPayloadAttributesPreparation preparation, final String reason) {
+    return "Payload attributes preparation for slot " + preparation.slot() + " " + reason;
+  }
+
+  private void completePendingPayloadAttributesPreparationExceptionally(
+      final PendingPayloadAttributesPreparation preparation, final Throwable error) {
     if (isCurrentPendingPayloadAttributesPreparation(preparation)) {
       pendingPayloadAttributesPreparation = Optional.empty();
-      final IllegalStateException error =
-          new IllegalStateException(
-              "Payload attributes preparation for slot " + preparation.slot() + " " + reason);
       pinnedBlockProductionPreparation
           .filter(
               pinnedPreparation ->

@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
-import static tech.pegasys.teku.api.ValidatorDataProvider.PARTIAL_PUBLISH_FAILURE_MESSAGE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_CONSENSUS_VERSION_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.SharedApiTypes.withDataWrapper;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
@@ -80,8 +79,7 @@ public class PostInclusionList extends RestApiEndpoint {
               if (errors.isEmpty()) {
                 return AsyncApiResponse.respondWithCode(SC_OK);
               }
-              return AsyncApiResponse.respondWithError(
-                  SC_BAD_REQUEST, PARTIAL_PUBLISH_FAILURE_MESSAGE);
+              return AsyncApiResponse.respondWithError(SC_BAD_REQUEST, errors.getFirst().message());
             }));
   }
 

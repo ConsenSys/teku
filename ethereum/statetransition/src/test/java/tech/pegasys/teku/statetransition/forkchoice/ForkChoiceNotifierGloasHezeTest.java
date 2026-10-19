@@ -255,9 +255,10 @@ class ForkChoiceNotifierGloasHezeTest {
 
     assertThatSafeFuture(preparationFuture)
         .isCompletedExceptionallyWith(IllegalStateException.class)
-        .hasMessageStartingWith(
-            "Payload attributes preparation for slot " + blockSlot + " failed: ")
-        .hasMessageEndingWith("calculation failed");
+        .hasMessage(
+            "Payload attributes preparation for slot " + blockSlot + " failed: calculation failed")
+        .hasRootCauseExactlyInstanceOf(RuntimeException.class)
+        .hasRootCauseMessage("calculation failed");
     // the pinned block production being refreshed fails with the same error
     assertThatSafeFuture(notifier.getPayloadId(parent, blockSlot))
         .isCompletedExceptionallyWith(IllegalStateException.class)

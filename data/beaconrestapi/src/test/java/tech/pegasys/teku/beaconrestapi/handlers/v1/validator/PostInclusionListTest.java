@@ -32,12 +32,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionListSchema;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.validator.api.SubmitDataError;
 
 public class PostInclusionListTest extends AbstractMigratedBeaconHandlerTest {
 
@@ -61,6 +64,23 @@ public class PostInclusionListTest extends AbstractMigratedBeaconHandlerTest {
 
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
     assertThat(request.getResponseBody()).isNull();
+  }
+
+  @Test
+  void shouldRespondWithRejectionReasonWhenInclusionListIsRejected() throws Exception {
+    final SignedInclusionList signedInclusionList = dataStructureUtil.randomSignedInclusionList();
+    request.setRequestBody(signedInclusionList);
+
+    when(validatorDataProvider.sendSignedInclusionList(anyList()))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                List.of(new SubmitDataError(UInt64.ZERO, "Invalid inclusion list signature"))));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(request.getResponseBody())
+        .isEqualTo(new HttpErrorResponse(SC_BAD_REQUEST, "Invalid inclusion list signature"));
   }
 
   @Test
