@@ -322,6 +322,31 @@ class SignedInclusionListValidatorTest {
         .isTrue();
   }
 
+  @Test
+  void shouldRejectInclusionListForCurrentPreHezeSlot() {
+    // Gossip topics are fork-checked, but the local API path
+    // (ValidatorApiHandler -> SignedInclusionListPublisher -> InclusionListManager) reaches the
+    // validator directly. The slot is current, so validation gets past the slot check.
+    final UInt64 preHezeSlot = lookaheadStartSlot;
+    assertThat(spec.atSlot(preHezeSlot).getMilestone()).isEqualTo(SpecMilestone.GLOAS);
+    when(gossipValidationHelper.isSlotCurrent(preHezeSlot)).thenReturn(true);
+    final InclusionList inclusionList =
+        schemaDefinitions
+            .getInclusionListSchema()
+            .create(
+                preHezeSlot,
+                UInt64.valueOf(committeeMember),
+                dependentRoot,
+                List.of(transaction(1)));
+
+    assertRejectedWith(
+        validate(
+            schemaDefinitions
+                .getSignedInclusionListSchema()
+                .create(inclusionList, BLSSignature.empty())),
+        "before the Heze fork");
+  }
+
   private InternalValidationResult validate(final SignedInclusionList signedInclusionList) {
     return safeJoin(validator.validate(signedInclusionList));
   }
