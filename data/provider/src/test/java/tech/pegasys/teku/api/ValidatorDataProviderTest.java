@@ -51,6 +51,7 @@ import tech.pegasys.teku.bls.BLSTestUtil;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
+import tech.pegasys.teku.ethereum.json.types.validator.InclusionListDuties;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
@@ -63,6 +64,8 @@ import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.execution.Transaction;
+import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
@@ -341,6 +344,61 @@ public class ValidatorDataProviderTest {
         .thenReturn(SafeFuture.completedFuture(errors));
 
     assertThatSafeFuture(provider.submitBuilderPreferences(entries)).isCompletedWithValue(errors);
+  }
+
+  @TestTemplate
+  void sendSignedInclusionList_shouldPreserveIndexedErrors() {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(SpecMilestone.HEZE);
+    final SignedInclusionList signedInclusionList = dataStructureUtil.randomSignedInclusionList();
+    final List<SubmitDataError> errors =
+        List.of(new SubmitDataError(ZERO, "Invalid inclusion list signature"));
+    when(validatorApiChannel.sendSignedInclusionLists(List.of(signedInclusionList)))
+        .thenReturn(SafeFuture.completedFuture(errors));
+
+    assertThatSafeFuture(provider.sendSignedInclusionList(List.of(signedInclusionList)))
+        .isCompletedWithValue(errors);
+  }
+
+  @TestTemplate
+  void getInclusionList_shouldReturnTransactionsFromValidatorApi() {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(SpecMilestone.HEZE);
+    final List<Transaction> transactions =
+        dataStructureUtil.randomInclusionList().getTransactions().asList();
+    when(validatorApiChannel.getInclusionList(ONE))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(transactions)));
+
+    assertThatSafeFuture(provider.getInclusionList(ONE))
+        .isCompletedWithValue(Optional.of(transactions));
+  }
+
+  @TestTemplate
+  void getInclusionList_shouldReturnFailedFutureWhenValidatorApiThrows() {
+    final IllegalArgumentException error = new IllegalArgumentException("pre-Heze slot");
+    when(validatorApiChannel.getInclusionList(ONE)).thenThrow(error);
+
+    assertThatSafeFuture(provider.getInclusionList(ONE)).isCompletedExceptionallyWith(error);
+  }
+
+  @TestTemplate
+  void getInclusionListDuties_shouldReturnDutiesFromValidatorApi() {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(SpecMilestone.HEZE);
+    final IntList indices = IntList.of(1, 2);
+    final InclusionListDuties duties =
+        new InclusionListDuties(false, dataStructureUtil.randomBytes32(), List.of());
+    when(validatorApiChannel.getInclusionListDuties(ONE, indices))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(duties)));
+
+    assertThatSafeFuture(provider.getInclusionListDuties(ONE, indices))
+        .isCompletedWithValue(Optional.of(duties));
+  }
+
+  @TestTemplate
+  void getInclusionListDuties_shouldReturnFailedFutureWhenValidatorApiThrows() {
+    final IllegalArgumentException error = new IllegalArgumentException("pre-Heze epoch");
+    when(validatorApiChannel.getInclusionListDuties(ONE, IntList.of(1))).thenThrow(error);
+
+    assertThatSafeFuture(provider.getInclusionListDuties(ONE, IntList.of(1)))
+        .isCompletedExceptionallyWith(error);
   }
 
   @TestTemplate
