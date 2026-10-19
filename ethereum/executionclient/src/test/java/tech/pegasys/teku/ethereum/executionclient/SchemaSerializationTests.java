@@ -20,6 +20,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
@@ -30,6 +31,7 @@ import java.io.StringWriter;
 import java.io.Writer;
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,8 +42,10 @@ import tech.pegasys.teku.ethereum.executionclient.schema.ForkChoiceUpdatedResult
 import tech.pegasys.teku.ethereum.executionclient.schema.ForkChoiceUpdatedResultV2;
 import tech.pegasys.teku.ethereum.executionclient.schema.PayloadAttributesV1;
 import tech.pegasys.teku.ethereum.executionclient.schema.PayloadAttributesV4;
+import tech.pegasys.teku.ethereum.executionclient.schema.PayloadAttributesV5;
 import tech.pegasys.teku.ethereum.executionclient.schema.PayloadStatusV1;
 import tech.pegasys.teku.ethereum.executionclient.schema.PayloadStatusV2;
+import tech.pegasys.teku.ethereum.executionclient.schema.WithdrawalV1;
 import tech.pegasys.teku.ethereum.executionclient.serialization.Bytes20Deserializer;
 import tech.pegasys.teku.ethereum.executionclient.serialization.Bytes20Serializer;
 import tech.pegasys.teku.ethereum.executionclient.serialization.Bytes32Deserializer;
@@ -373,6 +377,158 @@ public class SchemaSerializationTests {
         objectMapper.readValue(json, ForkChoiceUpdatedResultV2.class).asInternalExecutionPayload();
 
     assertThat(result.getPayloadStatus().getInclusionListSatisfied()).contains(false);
+  }
+
+  @TestTemplate
+  void shouldSerializeDeserializePayloadAttributesV5() throws IOException {
+    final List<Bytes> inclusionListTransactions =
+        List.of(dataStructureUtil.randomBytes(32), dataStructureUtil.randomBytes(100));
+    final PayloadAttributesV5 payloadAttributesV5Orig =
+        new PayloadAttributesV5(
+            dataStructureUtil.randomUInt64(),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomBytes20(),
+            List.of(
+                new WithdrawalV1(
+                    dataStructureUtil.randomUInt64(),
+                    dataStructureUtil.randomUInt64(),
+                    dataStructureUtil.randomBytes20(),
+                    dataStructureUtil.randomUInt64())),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomUInt64(),
+            dataStructureUtil.randomUInt64(),
+            inclusionListTransactions.stream().map(Bytes::toHexString).toList());
+
+    final String serialized = objectMapper.writeValueAsString(payloadAttributesV5Orig);
+    final PayloadAttributesV5 payloadAttributesV5New =
+        objectMapper.readValue(serialized, PayloadAttributesV5.class);
+
+    assertThat(payloadAttributesV5New).isEqualTo(payloadAttributesV5Orig);
+
+    final JsonNode json = objectMapper.readTree(serialized);
+    assertThat(json.get("slotNumber").asText())
+        .isEqualTo(UInt64AsHexSerializer.toHexString(payloadAttributesV5Orig.slotNumber));
+    assertThat(json.get("targetGasLimit").asText())
+        .isEqualTo(UInt64AsHexSerializer.toHexString(payloadAttributesV5Orig.targetGasLimit));
+    assertThat(json.get("parentBeaconBlockRoot").asText())
+        .isEqualTo(payloadAttributesV5Orig.parentBeaconBlockRoot.toHexString());
+    assertThat(json.get("withdrawals").size()).isEqualTo(1);
+    final JsonNode inclusionListJson = json.get("inclusionListTransactions");
+    assertThat(inclusionListJson.isArray()).isTrue();
+    assertThat(inclusionListJson.size()).isEqualTo(inclusionListTransactions.size());
+    for (int i = 0; i < inclusionListTransactions.size(); i++) {
+      assertThat(inclusionListJson.get(i).asText())
+          .isEqualTo(inclusionListTransactions.get(i).toHexString());
+    }
+  }
+
+  @TestTemplate
+  void shouldSerializePayloadAttributesV5WithEmptyInclusionListAsEmptyArray() throws IOException {
+    final PayloadAttributesV5 payloadAttributesV5 =
+        new PayloadAttributesV5(
+            dataStructureUtil.randomUInt64(),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomBytes20(),
+            List.of(),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomUInt64(),
+            dataStructureUtil.randomUInt64(),
+            List.of());
+
+    final String serialized = objectMapper.writeValueAsString(payloadAttributesV5);
+    final JsonNode inclusionListJson =
+        objectMapper.readTree(serialized).get("inclusionListTransactions");
+
+    assertThat(inclusionListJson.isArray()).isTrue();
+    assertThat(inclusionListJson.isEmpty()).isTrue();
+    assertThat(objectMapper.readValue(serialized, PayloadAttributesV5.class))
+        .isEqualTo(payloadAttributesV5);
+  }
+
+  @TestTemplate
+  void shouldDeserializePayloadStatusV2WithInclusionListSatisfied() throws IOException {
+    final Bytes32 latestValidHash = dataStructureUtil.randomBytes32();
+    final String json =
+        "{\"status\": \"VALID\", \"latestValidHash\": \""
+            + latestValidHash.toHexString()
+            + "\", \"validationError\": null, \"inclusionListSatisfied\": true }";
+
+    final PayloadStatusV2 payloadStatusV2 = objectMapper.readValue(json, PayloadStatusV2.class);
+
+    assertThat(payloadStatusV2)
+        .isEqualTo(new PayloadStatusV2(ExecutionPayloadStatus.VALID, latestValidHash, null, true));
+    assertThat(payloadStatusV2.asInternalExecutionPayload())
+        .isEqualTo(
+            PayloadStatus.valid(Optional.of(latestValidHash), Optional.empty(), Optional.of(true)));
+  }
+
+  @TestTemplate
+  void shouldDeserializePayloadStatusV2WithoutInclusionListSatisfied() throws IOException {
+    final Bytes32 latestValidHash = dataStructureUtil.randomBytes32();
+    final String json =
+        "{\"status\": \"INVALID\", \"latestValidHash\": \""
+            + latestValidHash.toHexString()
+            + "\", \"validationError\": \"test\" }";
+
+    final PayloadStatusV2 payloadStatusV2 = objectMapper.readValue(json, PayloadStatusV2.class);
+    final PayloadStatus internalPayloadStatus = payloadStatusV2.asInternalExecutionPayload();
+
+    assertThat(payloadStatusV2)
+        .isEqualTo(
+            new PayloadStatusV2(ExecutionPayloadStatus.INVALID, latestValidHash, "test", null));
+    assertThat(internalPayloadStatus)
+        .isEqualTo(PayloadStatus.invalid(Optional.of(latestValidHash), Optional.of("test")));
+    assertThat(internalPayloadStatus.getInclusionListSatisfied()).isEmpty();
+  }
+
+  @TestTemplate
+  void shouldThrowDeserializingInvalidPayloadStatusV2() {
+    assertThrows(
+        InvalidFormatException.class,
+        () ->
+            objectMapper.readValue(
+                "{\"status\": \"wrong\", \"inclusionListSatisfied\": true }",
+                PayloadStatusV2.class));
+
+    assertThrows(
+        ValueInstantiationException.class,
+        () ->
+            objectMapper.readValue(
+                "{\"status\": null, \"inclusionListSatisfied\": false }", PayloadStatusV2.class));
+
+    assertThrows(
+        MismatchedInputException.class,
+        () ->
+            objectMapper.readValue(
+                "{\"status\": \"VALID\", \"inclusionListSatisfied\": \"maybe\" }",
+                PayloadStatusV2.class));
+  }
+
+  @TestTemplate
+  void shouldDeserializeForkChoiceUpdatedResultV2WithPayloadId() throws IOException {
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    final Bytes32 latestValidHash = dataStructureUtil.randomBytes32();
+    final String json =
+        "{\"payloadStatus\": {\"status\": \"VALID\", \"latestValidHash\": \""
+            + latestValidHash.toHexString()
+            + "\", \"inclusionListSatisfied\": true}, \"payloadId\": \""
+            + payloadId.toHexString()
+            + "\" }";
+
+    final ForkChoiceUpdatedResultV2 deserialized =
+        objectMapper.readValue(json, ForkChoiceUpdatedResultV2.class);
+
+    assertThat(deserialized)
+        .isEqualTo(
+            new ForkChoiceUpdatedResultV2(
+                new PayloadStatusV2(ExecutionPayloadStatus.VALID, latestValidHash, null, true),
+                payloadId));
+    assertThat(deserialized.asInternalExecutionPayload())
+        .isEqualTo(
+            new tech.pegasys.teku.spec.executionlayer.ForkChoiceUpdatedResult(
+                PayloadStatus.valid(
+                    Optional.of(latestValidHash), Optional.empty(), Optional.of(true)),
+                Optional.of(payloadId)));
   }
 
   @TestTemplate
