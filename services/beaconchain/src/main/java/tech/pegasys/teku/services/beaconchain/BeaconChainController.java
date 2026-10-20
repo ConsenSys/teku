@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -2064,7 +2064,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
             p2PConfig.getBatchVerifyMaxThreads(),
             p2PConfig.getBatchVerifyQueueCapacity(),
             p2PConfig.getBatchVerifyMaxBatchSize(),
-            p2PConfig.isBatchVerifyStrictThreadLimitEnabled());
+            p2PConfig.isBatchVerifyStrictThreadLimitEnabled(),
+            p2PConfig.getBatchVerifyMode(),
+            p2PConfig.getBatchVerifyGatherTimeout());
   }
 
   protected void initAttestationManager() {

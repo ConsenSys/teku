@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -344,6 +344,21 @@ public abstract class RecentChainData
             head ->
                 spec.getAncestors(
                     store.getForkChoiceStrategy(), head.getRoot(), startSlot, step, count))
+        .orElseGet(TreeMap::new);
+  }
+
+  /**
+   * The payload-status-aware counterpart of {@link #getAncestorRootsOnHeadChain(UInt64, UInt64,
+   * UInt64)}: walks the chain of fork choice nodes leading to the head, so each entry carries the
+   * payload status the block has on the head chain.
+   */
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodesOnHeadChain(
+      final UInt64 startSlot, final UInt64 count) {
+    return chainHead
+        .map(
+            head ->
+                spec.getAncestorNodes(
+                    store.getForkChoiceStrategy(), head.getForkChoiceNode(), startSlot, count))
         .orElseGet(TreeMap::new);
   }
 

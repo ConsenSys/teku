@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.remote.eventsource;
 
 import static java.util.Collections.emptyMap;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -137,6 +138,20 @@ public class EventSourceBeaconChainEventAdapterTest {
 
     // But will try to return to primaryNode when it's possible
     verify(beaconNodeReadinessManager).performPrimaryReadinessCheck();
+  }
+
+  @Test
+  public void shouldUseASeparateEventHandlerPerBeaconNode() {
+    // a beacon node which stops delivering events must be reported on its own, rather than being
+    // masked by another beacon node which is working
+    final EventSourceBeaconChainEventAdapter eventSourceBeaconChainEventAdapter =
+        initEventSourceBeaconChainEventAdapter(false, false);
+    final RemoteValidatorApiChannel otherBeaconApiMock = mock(RemoteValidatorApiChannel.class);
+    when(otherBeaconApiMock.getEndpoint()).thenReturn(httpUrlMock);
+
+    assertThat(eventSourceBeaconChainEventAdapter.createEventSourceHandler(beaconApiMock))
+        .isNotSameAs(
+            eventSourceBeaconChainEventAdapter.createEventSourceHandler(otherBeaconApiMock));
   }
 
   private EventSourceBeaconChainEventAdapter initEventSourceBeaconChainEventAdapter(

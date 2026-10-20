@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -142,7 +142,7 @@ public class DiscV5Service extends Service implements DiscoveryService {
       nodeRecordBuilder.address(
           advertisedIps.get(0),
           discoConfig.getAdvertisedUdpPort(),
-          p2pConfig.getAdvertisedPort(),
+          p2pConfig.isTcpEnabled() ? Optional.of(p2pConfig.getAdvertisedPort()) : Optional.empty(),
           p2pConfig.isQuicEnabled()
               ? Optional.of(p2pConfig.getAdvertisedQuicPort())
               : Optional.empty());
@@ -156,11 +156,14 @@ public class DiscV5Service extends Service implements DiscoveryService {
                   case IP_V4 -> discoConfig.getAdvertisedUdpPort();
                   case IP_V6 -> discoConfig.getAdvertisedUdpPortIpv6();
                 };
-            final int advertisedTcpPort =
-                switch (ipVersion) {
-                  case IP_V4 -> p2pConfig.getAdvertisedPort();
-                  case IP_V6 -> p2pConfig.getAdvertisedPortIpv6();
-                };
+            final Optional<Integer> advertisedTcpPort =
+                p2pConfig.isTcpEnabled()
+                    ? Optional.of(
+                        switch (ipVersion) {
+                          case IP_V4 -> p2pConfig.getAdvertisedPort();
+                          case IP_V6 -> p2pConfig.getAdvertisedPortIpv6();
+                        })
+                    : Optional.empty();
             final Optional<Integer> advertisedQuicPort =
                 p2pConfig.isQuicEnabled()
                     ? Optional.of(

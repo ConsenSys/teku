@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 
 public class BlockGossipValidator {
@@ -97,6 +98,18 @@ public class BlockGossipValidator {
      */
     if (gossipValidationHelper.isSlotFinalized(block.getSlot())) {
       LOG.trace("BlockValidator: Block slot {} is finalized. Dropping.", block.getSlot());
+      return completedFuture(InternalValidationResult.IGNORE);
+    }
+
+    /*
+     * [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
+     * Blocks too far in the future to be queued for later processing are ignored before the block
+     * root is computed for the equivocation check, which can take a long time for a large block.
+     */
+    if (FutureBlockPool.isBeyondFutureSlotTolerance(
+        block.getSlot(), gossipValidationHelper.getMaxCurrentSlot())) {
+      LOG.trace(
+          "BlockValidator: Block slot {} is too far in the future. Dropping.", block.getSlot());
       return completedFuture(InternalValidationResult.IGNORE);
     }
 
@@ -329,10 +342,17 @@ public class BlockGossipValidator {
     return Optional.empty();
   }
 
-  synchronized EquivocationCheckResult performBlockEquivocationCheck(
+  EquivocationCheckResult performBlockEquivocationCheck(
       final boolean markAsReceived, final SignedBeaconBlock block) {
-    final SlotAndProposer slotAndProposer = new SlotAndProposer(block);
+    // computed before taking the lock, so that blocks are hashed in parallel
     final Bytes32 blockRoot = block.getRoot();
+    return performBlockEquivocationCheck(markAsReceived, new SlotAndProposer(block), blockRoot);
+  }
+
+  private synchronized EquivocationCheckResult performBlockEquivocationCheck(
+      final boolean markAsReceived,
+      final SlotAndProposer slotAndProposer,
+      final Bytes32 blockRoot) {
     return Optional.ofNullable(receivedValidBlockRoots.get(slotAndProposer))
         .map(
             previouslySeenBlockRoot -> {

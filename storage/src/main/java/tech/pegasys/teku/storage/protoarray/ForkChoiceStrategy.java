@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -395,6 +395,16 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   }
 
   @Override
+  public boolean contains(final ForkChoiceNode node) {
+    protoArrayLock.readLock().lock();
+    try {
+      return protoArray.getNode(node).isPresent();
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
   public Optional<UInt64> blockSlot(final Bytes32 blockRoot) {
     protoArrayLock.readLock().lock();
     try {
@@ -437,6 +447,18 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
               model ->
                   model.getExecutionGasLimitForBlockRootAndHash(
                       protoArray, blockNodeIndex, blockRoot, blockHash));
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public boolean isAwaitingExecutionPayload(final Bytes32 blockRoot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getForkChoiceModelForRoot(blockRoot)
+          .map(model -> model.isAwaitingExecutionPayload(blockNodeIndex, blockRoot))
+          .orElse(false);
     } finally {
       protoArrayLock.readLock().unlock();
     }
@@ -597,6 +619,16 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   @Override
   public Optional<ForkChoiceNode> getAncestorNode(final ForkChoiceNode node, final UInt64 slot) {
     return getAncestorProtoNode(node, slot).map(ProtoNode::getForkChoiceNode);
+  }
+
+  @Override
+  public Optional<ProtoNodeData> getAncestorNodeData(final ForkChoiceNode node, final UInt64 slot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getAncestorProtoNode(node, slot).map(ProtoNode::getBlockData);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
   }
 
   @Override

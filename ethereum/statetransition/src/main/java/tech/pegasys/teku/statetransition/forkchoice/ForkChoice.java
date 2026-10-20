@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -781,9 +781,10 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
 
     // Now that we're on the fork choice thread, make sure the block still descends from finalized
-    // (which may have changed while we were processing the block)
+    // (which may have changed while we were processing the block, as may the validity of the parent
+    // node it builds on)
     if (!forkChoiceUtil.blockDescendsFromLatestFinalizedBlock(
-        block.getSlot(), block.getParentRoot(), recentChainData.getStore(), forkChoiceStrategy)) {
+        block, blockSlotState, recentChainData.getStore(), forkChoiceStrategy)) {
       return BlockImportResult.FAILED_INVALID_ANCESTRY;
     }
 
@@ -837,7 +838,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final VoteUpdater voteUpdater = recentChainData.startVoteUpdate();
       // We also need to handle recent AttesterSlashings to update equivocating validator indices
       // We don't need any epochs older than previous as it doesn't affect ForkChoice
-      applyPayloadAttestationsFromBlock(block);
+      applyPayloadAttestationsFromBlock(block, postState);
       applyAttesterSlashingsFromBlock(block, voteUpdater);
       applyVotesFromBlock(forkChoiceStrategy, currentEpoch, indexedAttestationCache, voteUpdater);
       voteUpdater.commit();
@@ -1303,40 +1304,41 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         .forEach(attesterSlashing -> storeEquivocatingIndices(attesterSlashing, voteUpdater));
   }
 
-  private void applyPayloadAttestationsFromBlock(final SignedBeaconBlock signedBeaconBlock) {
+  private void applyPayloadAttestationsFromBlock(
+      final SignedBeaconBlock signedBeaconBlock, final BeaconState postState) {
     signedBeaconBlock
         .getMessage()
         .getBody()
         .getOptionalPayloadAttestations()
         .ifPresent(
             payloadAttestations ->
-                payloadAttestations.forEach(this::applyPayloadAttestationFromBlock));
+                payloadAttestations.forEach(
+                    payloadAttestation ->
+                        applyPayloadAttestationFromBlock(postState, payloadAttestation)));
   }
 
-  private void applyPayloadAttestationFromBlock(final PayloadAttestation payloadAttestation) {
-    recentChainData
-        .getStore()
-        .getBlockStateIfAvailable(payloadAttestation.getData().getBeaconBlockRoot())
-        .filter(
-            attestedBlockState ->
-                attestedBlockState.getSlot().equals(payloadAttestation.getData().getSlot()))
-        .ifPresent(
-            attestedBlockState ->
-                getPayloadAttestationMessagesFromBlock(attestedBlockState, payloadAttestation)
-                    .forEach(
-                        validatableMessage -> {
-                          validatableMessage.calculatePayloadTimelinessCommitteePositions(
-                              spec, attestedBlockState);
-                          onPayloadAttestationMessage(
-                              validatableMessage, InternalValidationResult.ACCEPT, false);
-                        }));
+  private void applyPayloadAttestationFromBlock(
+      final BeaconState postState, final PayloadAttestation payloadAttestation) {
+    if (recentChainData
+        .getSlotForBlockRoot(payloadAttestation.getData().getBeaconBlockRoot())
+        .filter(payloadAttestation.getData().getSlot()::equals)
+        .isEmpty()) {
+      return;
+    }
+    getPayloadAttestationMessagesFromBlock(postState, payloadAttestation)
+        .forEach(
+            validatableMessage -> {
+              validatableMessage.calculatePayloadTimelinessCommitteePositions(spec, postState);
+              onPayloadAttestationMessage(
+                  validatableMessage, InternalValidationResult.ACCEPT, false);
+            });
   }
 
   @VisibleForTesting
   List<ValidatablePayloadAttestationMessage> getPayloadAttestationMessagesFromBlock(
-      final BeaconState attestedBlockState, final PayloadAttestation payloadAttestation) {
+      final BeaconState postState, final PayloadAttestation payloadAttestation) {
     final UInt64 slot = payloadAttestation.getData().getSlot();
-    final IntList payloadTimelinessCommittee = spec.getPtc(attestedBlockState, slot);
+    final IntList payloadTimelinessCommittee = spec.getPtc(postState, slot);
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(spec.atSlot(slot).getSchemaDefinitions());
     return payloadAttestation

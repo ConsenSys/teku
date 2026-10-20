@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -20,6 +20,20 @@ import org.apache.tuweni.bytes.Bytes48;
 import org.apache.tuweni.ssz.SSZ;
 import tech.pegasys.teku.kzg.KZGProof;
 
+/**
+ * Serializes the KZG proofs of a slot's extension columns, one inner list per column:
+ *
+ * <pre>
+ * int32 proofsPerColumn                                  (4 bytes, little-endian)
+ * column 0: proofsPerColumn x compressed KZG proof       (48 bytes each)
+ * column 1: proofsPerColumn x compressed KZG proof
+ * ...
+ * </pre>
+ *
+ * <p>Every column holds one proof per blob, so {@code proofsPerColumn} is the block's blob count.
+ * It varies per slot and this serializer has no access to the spec to derive it from the total
+ * proof count, so it is stored up front to split the flat proofs back into columns.
+ */
 public class DataColumnSidecarsProofsSerializer implements KvStoreSerializer<List<List<KZGProof>>> {
   @Override
   public List<List<KZGProof>> deserialize(final byte[] data) {
@@ -28,13 +42,13 @@ public class DataColumnSidecarsProofsSerializer implements KvStoreSerializer<Lis
         reader -> {
           final List<List<KZGProof>> output = new ArrayList<>();
           final List<KZGProof> currentProofs = new ArrayList<>();
-          final int blobSize = reader.readInt32();
+          final int proofsPerColumn = reader.readInt32();
 
           while (!reader.isComplete()) {
             final KZGProof kzgProof =
                 KZGProof.fromBytesCompressed(Bytes48.wrap(reader.readFixedBytes(KZGProof.SIZE)));
             currentProofs.add(kzgProof);
-            if (currentProofs.size() == blobSize) {
+            if (currentProofs.size() == proofsPerColumn) {
               output.add(new ArrayList<>(currentProofs));
               currentProofs.clear();
             }
@@ -43,8 +57,8 @@ public class DataColumnSidecarsProofsSerializer implements KvStoreSerializer<Lis
           if (!currentProofs.isEmpty()) {
             throw new RuntimeException(
                 String.format(
-                    "Unexpected proofs found in database. Expecting %d blobs, deserialized %s columns",
-                    blobSize, output.size()));
+                    "Unexpected proofs found in database. Expecting %d proofs per column, deserialized %s columns",
+                    proofsPerColumn, output.size()));
           }
           return output;
         });
@@ -52,11 +66,17 @@ public class DataColumnSidecarsProofsSerializer implements KvStoreSerializer<Lis
 
   @Override
   public byte[] serialize(final List<List<KZGProof>> value) {
+    final int proofsPerColumn = value.isEmpty() ? 0 : value.getFirst().size();
+    // only the first column's length is stored, so columns of any other length would be regrouped
+    // wrongly on read
+    if (value.stream().anyMatch(column -> column.size() != proofsPerColumn)) {
+      throw new IllegalArgumentException(
+          String.format("Expected %d proofs in every column, got ragged columns", proofsPerColumn));
+    }
     Bytes bytes =
         SSZ.encode(
             writer -> {
-              final int blobSize = value.isEmpty() ? 0 : value.getFirst().size();
-              writer.writeInt32(blobSize);
+              writer.writeInt32(proofsPerColumn);
               value.forEach(
                   column ->
                       column.forEach(

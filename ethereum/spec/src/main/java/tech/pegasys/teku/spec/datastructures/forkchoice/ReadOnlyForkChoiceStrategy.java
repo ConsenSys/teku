@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -34,6 +34,30 @@ public interface ReadOnlyForkChoiceStrategy {
     return Optional.empty();
   }
 
+  /**
+   * Returns whether block {@code blockRoot} is tracked but no execution payload for it has ever
+   * been imported into fork choice.
+   *
+   * <p>This is a Gloas notion: the payload is the block's FULL variant and fork choice remembers
+   * having imported it for as long as the block is tracked, also after the execution layer has
+   * invalidated it. The answer is not durable across pruning or a restart, and it says nothing
+   * about the payload's current validity, see {@link #getBlockData(Bytes32,
+   * ForkChoicePayloadStatus)} for that. Implementations that do not model the Gloas tree may return
+   * false.
+   *
+   * <table>
+   * <caption>Result per state of the block in fork choice</caption>
+   * <tr><th>Block state</th><th>Result</th></tr>
+   * <tr><td>Tracked, FULL never imported</td><td>{@code true}</td></tr>
+   * <tr><td>Tracked, FULL currently present</td><td>{@code false}</td></tr>
+   * <tr><td>Tracked, FULL invalidated</td><td>{@code false}</td></tr>
+   * <tr><td>No longer tracked</td><td>{@code false}</td></tr>
+   * </table>
+   */
+  default boolean isAwaitingExecutionPayload(final Bytes32 blockRoot) {
+    return false;
+  }
+
   Optional<Bytes32> getAncestor(Bytes32 blockRoot, UInt64 slot);
 
   /**
@@ -54,6 +78,17 @@ public interface ReadOnlyForkChoiceStrategy {
    * nodes.
    */
   Optional<ForkChoiceNode> getAncestorNode(ForkChoiceNode node, UInt64 slot);
+
+  /**
+   * Returns an immutable snapshot of the ancestor node at {@code slot}.
+   *
+   * <p>Implementations backed by mutable fork-choice state should override this method so ancestry
+   * resolution and node-data lookup occur atomically.
+   */
+  default Optional<ProtoNodeData> getAncestorNodeData(
+      final ForkChoiceNode node, final UInt64 slot) {
+    return getAncestorNode(node, slot).flatMap(this::getNodeData);
+  }
 
   /**
    * Resolves a latest-message vote to the fork-choice node that it supports.
@@ -108,6 +143,14 @@ public interface ReadOnlyForkChoiceStrategy {
   }
 
   boolean contains(Bytes32 blockRoot);
+
+  /**
+   * Whether fork choice currently tracks {@code node}: it has been added and neither pruned nor
+   * invalidated by the execution layer since.
+   */
+  default boolean contains(final ForkChoiceNode node) {
+    return getBlockData(node.blockRoot(), node.payloadStatus()).isPresent();
+  }
 
   Optional<Boolean> isOptimistic(Bytes32 blockRoot);
 

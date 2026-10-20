@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -470,9 +470,15 @@ public class ValidatorClientService extends Service {
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
     final BlockContainerSigner blockContainerSigner = new MilestoneBasedBlockContainerSigner(spec);
     final ValidatorDutyMetrics validatorDutyMetrics = ValidatorDutyMetrics.create(metricsSystem);
-    final BuilderConfigProvider builderConfigProvider =
-        new BuilderConfigProvider(spec, config.getValidatorConfig());
-    validatorTimingChannels.add(builderConfigProvider);
+    final BuilderConfigProvider builderConfigProvider;
+    if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
+      final DefaultBuilderConfigProvider builderConfigProviderImpl =
+          new DefaultBuilderConfigProvider(spec, proposerConfigManager.orElseThrow());
+      validatorTimingChannels.add(builderConfigProviderImpl);
+      builderConfigProvider = builderConfigProviderImpl;
+    } else {
+      builderConfigProvider = BuilderConfigProvider.NOOP;
+    }
     final BlockDutyFactory blockDutyFactory =
         new BlockDutyFactory(
             forkProvider,
@@ -618,7 +624,11 @@ public class ValidatorClientService extends Service {
       validatorTimingChannels.add(proposerPreferencesPublisher);
       final BuilderPreferencesPublisher builderPreferencesPublisher =
           new BuilderPreferencesPublisher(
-              validators, spec, validatorApiChannel, builderConfigProvider);
+              validators,
+              spec,
+              validatorApiChannel,
+              proposerConfigManager.orElseThrow(),
+              builderConfigProvider);
       validatorTimingChannels.add(builderPreferencesPublisher);
     }
 
