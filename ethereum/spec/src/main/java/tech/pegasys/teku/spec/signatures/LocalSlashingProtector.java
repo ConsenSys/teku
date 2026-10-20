@@ -76,16 +76,16 @@ public class LocalSlashingProtector implements SlashingProtector {
   }
 
   @Override
-  public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator)
-      throws IOException {
+  public synchronized Optional<ValidatorSigningRecord> getSigningRecord(
+      final BLSPublicKey validator) throws IOException {
     final ValidatorSigningRecord record = signingRecords.get(validator);
     if (record != null) {
       return Optional.of(record);
     }
-    final Optional<ValidatorSigningRecord> loaded =
-        dataAccessor.read(validatorRecordPath(validator)).map(ValidatorSigningRecord::fromBytes);
-    loaded.ifPresent(signingRecord -> signingRecords.put(validator, signingRecord));
-    return loaded;
+    // only signing populates the cache, so a query for a key that is not signing (for example one
+    // deleted after being queued for the protection summary) cannot cache a record that a later
+    // import raises
+    return readSigningRecord(validator);
   }
 
   @Override
@@ -95,14 +95,20 @@ public class LocalSlashingProtector implements SlashingProtector {
 
   private ValidatorSigningRecord loadOrCreateSigningRecord(
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) throws IOException {
-    final Optional<ValidatorSigningRecord> record = getSigningRecord(validator);
-    return record.orElseGet(
-        () -> {
-          final ValidatorSigningRecord newRecord =
-              ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot);
-          signingRecords.put(validator, newRecord);
-          return newRecord;
-        });
+    final ValidatorSigningRecord cachedRecord = signingRecords.get(validator);
+    if (cachedRecord != null) {
+      return cachedRecord;
+    }
+    final ValidatorSigningRecord record =
+        readSigningRecord(validator)
+            .orElseGet(() -> ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot));
+    signingRecords.put(validator, record);
+    return record;
+  }
+
+  private Optional<ValidatorSigningRecord> readSigningRecord(final BLSPublicKey validator)
+      throws IOException {
+    return dataAccessor.read(validatorRecordPath(validator)).map(ValidatorSigningRecord::fromBytes);
   }
 
   private void writeSigningRecord(final BLSPublicKey validator, final ValidatorSigningRecord record)

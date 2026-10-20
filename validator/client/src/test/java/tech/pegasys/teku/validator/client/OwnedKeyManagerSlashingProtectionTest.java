@@ -37,6 +37,7 @@ import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
+import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
@@ -76,9 +77,11 @@ class OwnedKeyManagerSlashingProtectionTest {
   private final Bytes32 genesisValidatorsRoot = forkInfo.getGenesisValidatorsRoot();
   private final String keystore = loadKeystore();
   private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+  private final StubAsyncRunner loggerAsyncRunner = new StubAsyncRunner();
 
   private Path slashingProtectionPath;
   private ValidatorLoader validatorLoader;
+  private SlashingProtectionLogger slashingProtectionLogger;
   private OwnedKeyManager keyManager;
 
   private void setup(final Path tempDir, final boolean concurrentProtector) {
@@ -89,6 +92,9 @@ class OwnedKeyManagerSlashingProtectionTest {
         concurrentProtector
             ? new LocalSlashingProtectorConcurrentAccess(dataAccessor, slashingProtectionPath)
             : new LocalSlashingProtector(dataAccessor, slashingProtectionPath);
+    slashingProtectionLogger =
+        new SlashingProtectionLogger(
+            slashingProtector, spec, loggerAsyncRunner, mock(ValidatorLogger.class));
     validatorLoader =
         ValidatorLoader.create(
             spec,
@@ -96,7 +102,7 @@ class OwnedKeyManagerSlashingProtectionTest {
             InteropConfig.builder().specProvider(spec).build(),
             () -> null,
             slashingProtector,
-            mock(SlashingProtectionLogger.class),
+            slashingProtectionLogger,
             mock(PublicKeyLoader.class),
             asyncRunner,
             new StubMetricsSystem(),
@@ -119,6 +125,37 @@ class OwnedKeyManagerSlashingProtectionTest {
         .containsExactly(DeletionStatus.DELETED);
 
     // the key signed elsewhere while it was deleted, and comes back with that history
+    assertThat(importKey(Optional.of(interchange(5000, 905, 906))).getImportStatus())
+        .isEqualTo(ImportStatus.IMPORTED);
+
+    assertAttestationRefused(0, 9);
+    assertThat(readRecordFile())
+        .isEqualTo(
+            new ValidatorSigningRecord(
+                Optional.of(genesisValidatorsRoot),
+                UInt64.valueOf(5000),
+                UInt64.valueOf(905),
+                UInt64.valueOf(906)));
+  }
+
+  @ParameterizedTest(name = "concurrentProtector={0}")
+  @ValueSource(booleans = {false, true})
+  void shouldUseHistoryImportedAfterDeleteWhenProtectionSummaryRunsInBetween(
+      final boolean concurrentProtector, @TempDir final Path tempDir) throws Exception {
+    setup(tempDir, concurrentProtector);
+    assertThat(importKey(Optional.empty()).getImportStatus()).isEqualTo(ImportStatus.IMPORTED);
+    assertAttestationSigned(0, 5);
+    // the summary captures the loaded validators and runs later, on the first slot
+    slashingProtectionLogger.protectionSummary(
+        validatorLoader.getOwnedValidators().getValidators());
+    slashingProtectionLogger.onSlot(UInt64.valueOf(48));
+
+    assertThat(keyManager.deleteValidators(List.of(PUBLIC_KEY), slashingProtectionPath).getData())
+        .extracting(DeleteKeyResult::getStatus)
+        .containsExactly(DeletionStatus.DELETED);
+    assertThat(loggerAsyncRunner.hasDelayedActions()).isTrue();
+    loggerAsyncRunner.executeQueuedActions();
+
     assertThat(importKey(Optional.of(interchange(5000, 905, 906))).getImportStatus())
         .isEqualTo(ImportStatus.IMPORTED);
 

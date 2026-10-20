@@ -76,6 +76,34 @@ class LocalSlashingProtectorTest {
   }
 
   @Test
+  void getSigningRecord_shouldNotCacheRecordReadFromStorage() throws Exception {
+    final ValidatorSigningRecord storedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(3),
+            UInt64.valueOf(4),
+            UInt64.valueOf(6));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(storedRecord.toBytes()));
+    assertThat(getSlashingProtector().getSigningRecord(validator)).contains(storedRecord);
+
+    // history raised in storage after the query, before the key signs
+    final ValidatorSigningRecord importedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(905),
+            UInt64.valueOf(906));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(importedRecord.toBytes()));
+
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4), UInt64.valueOf(8)))
+        .isCompletedWithValue(false);
+    verify(dataWriter, never()).syncedWrite(any(), any());
+  }
+
+  @Test
   void evictSigningRecord_shouldReloadRecordUpdatedInStorage() throws Exception {
     final ValidatorSigningRecord initialRecord =
         new ValidatorSigningRecord(
