@@ -14,7 +14,6 @@
 package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING;
@@ -198,19 +197,15 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
     }
     final ForkChoiceNode node =
         selectedNode.orElseThrow(
-            () -> new IllegalStateException("Canonical payload status is unavailable"));
-    checkState(
-        node.blockRoot().equals(block.getRoot()),
-        "Head changed while preparing attestation for slot %s",
-        slot);
-    if (node.payloadStatus() == PAYLOAD_STATUS_PENDING) {
-      final SpecConfigGloas config = SpecConfigGloas.required(specConfig);
-      final UInt64 firstGloasSlot = config.getGloasForkEpoch().times(config.getSlotsPerEpoch());
-      checkState(
-          block.getSlot().isLessThan(firstGloasSlot),
-          "Canonical payload status is pending for an older block at slot %s",
+            () -> new IllegalArgumentException("Canonical payload status is unavailable"));
+    if (node.payloadStatus() == PAYLOAD_STATUS_PENDING
+        && block.getBody().toVersionGloas().isPresent()) {
+      // get_head never returns PENDING for a Gloas block. A pre-Gloas block at the fork boundary
+      // has no payload status and signals 0; anything else is unexpected, so fall back to EMPTY.
+      LOG.warn(
+          "Fork choice head {} has pending payload status when attesting at slot {}, using 0",
+          block.getRoot(),
           slot);
-      return 0;
     }
     return node.payloadStatus() == PAYLOAD_STATUS_FULL ? 1 : 0;
   }
@@ -237,6 +232,9 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
   /**
    * Return whether the execution payload envelope for the beacon block with root ``root`` has been
    * locally delivered and verified via ``on_execution_payload_envelope``.
+   *
+   * <p>Kept as the {@code is_payload_verified} spec mapping; fork choice uses its own check in
+   * {@code ForkChoiceModelGloas}.
    */
   public boolean isPayloadVerified(final ReadOnlyStore store, final Bytes32 root) {
     return store.getExecutionPayloadIfAvailable(root).isPresent();

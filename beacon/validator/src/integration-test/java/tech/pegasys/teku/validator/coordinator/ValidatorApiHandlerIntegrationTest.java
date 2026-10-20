@@ -63,7 +63,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
-import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
@@ -271,7 +270,7 @@ public class ValidatorApiHandlerIntegrationTest {
     SignedBlockAndState epochBoundaryBlock = null;
     while (chainUpdater.getHeadSlot().compareTo(targetSlot) < 0) {
       latestBlock = chainUpdater.advanceChain(chainUpdater.getHeadSlot().increment());
-      updateBestBlock(specContext, latestBlock);
+      chainUpdater.updateBestBlock(latestBlock);
       if (latestBlock.getSlot().equals(targetEpochStartSlot)) {
         epochBoundaryBlock = latestBlock;
       }
@@ -286,6 +285,8 @@ public class ValidatorApiHandlerIntegrationTest {
     assertThatSafeFuture(result).isCompletedWithNonEmptyOptional();
     final AttestationData attestation = safeJoin(result).orElseThrow();
     assertThat(attestation.getBeaconBlockRoot()).isEqualTo(latestBlock.getRoot());
+    // Gloas: the head is FULL but in the attestation slot, so the index is still 0
+    assertThat(attestation.getIndex()).isEqualTo(UInt64.ZERO);
     assertThat(attestation.getSource()).isEqualTo(genesisCheckpoint);
     assertThat(attestation.getTarget()).isEqualTo(expectedTarget);
   }
@@ -306,7 +307,7 @@ public class ValidatorApiHandlerIntegrationTest {
     SignedBlockAndState latestBlock = null;
     while (chainUpdater.getHeadSlot().compareTo(latestSlot) < 0) {
       latestBlock = chainUpdater.advanceChain(chainUpdater.getHeadSlot().increment());
-      updateBestBlock(specContext, latestBlock);
+      chainUpdater.updateBestBlock(latestBlock);
     }
     chainUpdater.setCurrentSlot(targetSlot);
     assertThat(latestBlock).isNotNull();
@@ -325,23 +326,6 @@ public class ValidatorApiHandlerIntegrationTest {
                 : UInt64.ZERO);
     assertThat(attestation.getSource()).isEqualTo(genesisCheckpoint);
     assertThat(attestation.getTarget()).isEqualTo(expectedTarget);
-  }
-
-  private void updateBestBlock(final SpecContext specContext, final SignedBlockAndState bestBlock) {
-    chainUpdater.updateBestBlock(bestBlock);
-    if (specContext.getSpecMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
-      final ForkChoiceNode fullPayloadHead = ForkChoiceNode.createFull(bestBlock.getRoot());
-      assertThat(
-              storageSystem
-                  .recentChainData()
-                  .getStore()
-                  .getForkChoiceStrategy()
-                  .getNodeData(fullPayloadHead))
-          .isPresent();
-      storageSystem.recentChainData().updateHead(fullPayloadHead, bestBlock.getSlot());
-      assertThat(storageSystem.recentChainData().getChainHead().orElseThrow().isOptimistic())
-          .isFalse();
-    }
   }
 
   @TestTemplate

@@ -14,13 +14,13 @@
 package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -195,18 +195,38 @@ class ForkChoiceUtilGloasTest {
   }
 
   @Test
-  void computeCommitteeIndexForAttestation_shouldRejectPendingGloasHead() {
+  void computeCommitteeIndexForAttestation_shouldUseZeroForPendingGloasHead() {
+    assertCommitteeIndex(gloasSlot.increment(), ForkChoiceNode::createBase, 0);
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseOneForFullHead() {
+    assertCommitteeIndex(gloasSlot.increment(), ForkChoiceNode::createFull, 1);
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForEmptyHead() {
+    assertCommitteeIndex(gloasSlot.increment(), ForkChoiceNode::createEmpty, 0);
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForFullHeadInAttestationSlot() {
+    assertCommitteeIndex(gloasSlot, ForkChoiceNode::createFull, 0);
+  }
+
+  private void assertCommitteeIndex(
+      final UInt64 attestationSlot,
+      final Function<Bytes32, ForkChoiceNode> nodeForRoot,
+      final int expectedIndex) {
     final BeaconBlock gloasBlock = dataStructureUtil.randomBeaconBlock(gloasSlot);
 
-    assertThatThrownBy(
-            () ->
-                forkChoiceUtil.computeCommitteeIndexForAttestation(
-                    gloasSlot.increment(),
-                    gloasBlock,
-                    0,
-                    Optional.of(ForkChoiceNode.createBase(gloasBlock.getRoot()))))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("Canonical payload status is pending");
+    assertThat(
+            forkChoiceUtil.computeCommitteeIndexForAttestation(
+                attestationSlot,
+                gloasBlock,
+                0,
+                Optional.of(nodeForRoot.apply(gloasBlock.getRoot()))))
+        .isEqualTo(expectedIndex);
   }
 
   @Test
