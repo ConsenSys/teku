@@ -66,6 +66,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.SszVector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -100,6 +101,8 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConso
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.EpochProcessor;
@@ -1511,6 +1514,96 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     assertThatThrownBy(() -> chainDataProvider.getProposerLookahead(Optional.of(stateAndMetaData)))
         .isInstanceOf(BadRequestException.class)
         .hasMessageContaining("does not contain proposer lookahead");
+  }
+
+  @Test
+  void getBuilderPendingWithdrawals_withEmptyInput() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    assertThat(chainDataProvider.getBuilderPendingWithdrawals(Optional.empty())).isEmpty();
+  }
+
+  @Test
+  void getBuilderPendingWithdrawals_respondsSuccessfully() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
+    final SszList<BuilderPendingWithdrawal> withdrawals =
+        state
+            .getBuilderPendingWithdrawals()
+            .getSchema()
+            .of(
+                dataStructureUtil.randomBuilderPendingWithdrawal(),
+                dataStructureUtil.randomBuilderPendingWithdrawal());
+    final BeaconStateGloas gloasState =
+        state.updatedGloas(mutable -> mutable.setBuilderPendingWithdrawals(withdrawals));
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(gloasState, SpecMilestone.GLOAS, true, true, false);
+
+    assertThat(chainDataProvider.getBuilderPendingWithdrawals(Optional.of(stateAndMetaData)))
+        .contains(new ObjectAndMetaData<>(withdrawals, SpecMilestone.GLOAS, true, true, false));
+  }
+
+  @Test
+  void getBuilderPendingWithdrawals_failsBeforeGloas() {
+    final Spec fulu = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(fulu);
+    final ChainDataProvider chainDataProvider = setupBySpec(fulu, dataStructureUtil, 16);
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(
+            dataStructureUtil.randomBeaconState(), SpecMilestone.FULU, true, true, true);
+    assertThatThrownBy(
+            () -> chainDataProvider.getBuilderPendingWithdrawals(Optional.of(stateAndMetaData)))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("prior to GLOAS and does not contain builder pending withdrawals");
+  }
+
+  @Test
+  void getBuilderPendingPayments_withEmptyInput() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    assertThat(chainDataProvider.getBuilderPendingPayments(Optional.empty())).isEmpty();
+  }
+
+  @Test
+  void getBuilderPendingPayments_respondsSuccessfully() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
+    final BuilderPendingPayment payment = dataStructureUtil.randomBuilderPendingPayment();
+    final BeaconStateGloas gloasState =
+        state.updatedGloas(mutable -> mutable.getBuilderPendingPayments().set(1, payment));
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(gloasState, SpecMilestone.GLOAS, true, true, false);
+
+    final Optional<ObjectAndMetaData<SszVector<BuilderPendingPayment>>> result =
+        chainDataProvider.getBuilderPendingPayments(Optional.of(stateAndMetaData));
+
+    assertThat(result)
+        .contains(
+            new ObjectAndMetaData<>(
+                gloasState.getBuilderPendingPayments(), SpecMilestone.GLOAS, true, true, false));
+    assertThat(result.orElseThrow().getData().size())
+        .isEqualTo(2 * gloas.getGenesisSpecConfig().getSlotsPerEpoch());
+    assertThat(result.orElseThrow().getData().get(1)).isEqualTo(payment);
+  }
+
+  @Test
+  void getBuilderPendingPayments_failsBeforeGloas() {
+    final Spec fulu = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(fulu);
+    final ChainDataProvider chainDataProvider = setupBySpec(fulu, dataStructureUtil, 16);
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(
+            dataStructureUtil.randomBeaconState(), SpecMilestone.FULU, true, true, true);
+    assertThatThrownBy(
+            () -> chainDataProvider.getBuilderPendingPayments(Optional.of(stateAndMetaData)))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("prior to GLOAS and does not contain builder pending payments");
   }
 
   @Test

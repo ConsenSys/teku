@@ -60,6 +60,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.SszVector;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -94,6 +95,8 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConso
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatuses;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
@@ -1088,6 +1091,22 @@ public class ChainDataProvider {
         .thenApply(this::getPendingConsolidations);
   }
 
+  public SafeFuture<Optional<ObjectAndMetaData<SszList<BuilderPendingWithdrawal>>>>
+      getStateBuilderPendingWithdrawals(final String stateIdParam) {
+    return stateSelectorFactory
+        .createSelectorForStateId(stateIdParam)
+        .getState()
+        .thenApply(this::getBuilderPendingWithdrawals);
+  }
+
+  public SafeFuture<Optional<ObjectAndMetaData<SszVector<BuilderPendingPayment>>>>
+      getStateBuilderPendingPayments(final String stateIdParam) {
+    return stateSelectorFactory
+        .createSelectorForStateId(stateIdParam)
+        .getState()
+        .thenApply(this::getBuilderPendingPayments);
+  }
+
   Optional<ObjectAndMetaData<SszList<PendingDeposit>>> getPendingDeposits(
       final Optional<StateAndMetaData> maybeStateAndMetadata) {
 
@@ -1141,6 +1160,41 @@ public class ChainDataProvider {
                   .getPendingConsolidations();
           return new ObjectAndMetaData<>(
               consolidations,
+              stateAndMetaData.getMilestone(),
+              stateAndMetaData.isExecutionOptimistic(),
+              stateAndMetaData.isCanonical(),
+              stateAndMetaData.isFinalized());
+        });
+  }
+
+  Optional<ObjectAndMetaData<SszList<BuilderPendingWithdrawal>>> getBuilderPendingWithdrawals(
+      final Optional<StateAndMetaData> maybeStateAndMetadata) {
+    checkMinimumMilestone(
+        maybeStateAndMetadata, SpecMilestone.GLOAS, "builder pending withdrawals");
+
+    return maybeStateAndMetadata.map(
+        stateAndMetaData -> {
+          final SszList<BuilderPendingWithdrawal> withdrawals =
+              BeaconStateGloas.required(stateAndMetaData.getData()).getBuilderPendingWithdrawals();
+          return new ObjectAndMetaData<>(
+              withdrawals,
+              stateAndMetaData.getMilestone(),
+              stateAndMetaData.isExecutionOptimistic(),
+              stateAndMetaData.isCanonical(),
+              stateAndMetaData.isFinalized());
+        });
+  }
+
+  Optional<ObjectAndMetaData<SszVector<BuilderPendingPayment>>> getBuilderPendingPayments(
+      final Optional<StateAndMetaData> maybeStateAndMetadata) {
+    checkMinimumMilestone(maybeStateAndMetadata, SpecMilestone.GLOAS, "builder pending payments");
+
+    return maybeStateAndMetadata.map(
+        stateAndMetaData -> {
+          final SszVector<BuilderPendingPayment> payments =
+              BeaconStateGloas.required(stateAndMetaData.getData()).getBuilderPendingPayments();
+          return new ObjectAndMetaData<>(
+              payments,
               stateAndMetaData.getMilestone(),
               stateAndMetaData.isExecutionOptimistic(),
               stateAndMetaData.isCanonical(),
