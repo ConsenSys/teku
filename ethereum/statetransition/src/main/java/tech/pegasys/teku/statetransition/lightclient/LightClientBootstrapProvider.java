@@ -40,7 +40,6 @@ public class LightClientBootstrapProvider {
         .thenCompose(
             maybeBlock ->
                 maybeBlock
-                    .filter(this::isWithinServableRange)
                     .map(block -> createBootstrapIfFinalizedEpochBoundary(blockRoot, block))
                     .orElse(SafeFuture.completedFuture(Optional.empty())));
   }
@@ -52,7 +51,8 @@ public class LightClientBootstrapProvider {
         spec.computeStartSlotAtEpoch(blockEpoch).equals(block.getSlot())
             ? blockEpoch
             : blockEpoch.plus(1);
-    if (!combinedChainDataClient.isFinalizedEpoch(boundaryEpoch)) {
+    if (!isWithinServableRange(boundaryEpoch)
+        || !combinedChainDataClient.isFinalizedEpoch(boundaryEpoch)) {
       return SafeFuture.completedFuture(Optional.empty());
     }
     return combinedChainDataClient
@@ -79,11 +79,11 @@ public class LightClientBootstrapProvider {
                             .map(util -> util.createLightClientBootstrap(state, block))));
   }
 
-  private boolean isWithinServableRange(final SignedBeaconBlock block) {
+  private boolean isWithinServableRange(final UInt64 boundaryEpoch) {
     final UInt64 currentEpoch =
         combinedChainDataClient.getRecentChainData().getCurrentEpoch().orElse(UInt64.ZERO);
     final UInt64 minEpoch =
         currentEpoch.minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
-    return spec.computeEpochAtSlot(block.getSlot()).isGreaterThanOrEqualTo(minEpoch);
+    return boundaryEpoch.isGreaterThanOrEqualTo(minEpoch);
   }
 }

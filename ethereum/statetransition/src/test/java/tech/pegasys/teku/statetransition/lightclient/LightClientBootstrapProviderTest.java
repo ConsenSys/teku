@@ -96,6 +96,15 @@ class LightClientBootstrapProviderTest {
   }
 
   @Test
+  void shouldCreateBootstrapWhenBlockEpochIsBeforeServableRangeButCheckpointEpochIsNot() {
+    final UInt64 currentEpoch =
+        UInt64.valueOf(spec.getNetworkingConfig().getMinEpochsForBlockRequests()).plus(1);
+    when(recentChainData.getCurrentEpoch()).thenReturn(Optional.of(currentEpoch));
+
+    assertThat(getBootstrap(blockAndState.getRoot())).isPresent();
+  }
+
+  @Test
   void shouldReturnEmptyWhenEpochBoundaryNotFinalized() {
     when(combinedChainDataClient.isFinalizedEpoch(UInt64.ONE)).thenReturn(false);
 
