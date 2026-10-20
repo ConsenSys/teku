@@ -13,31 +13,24 @@
 
 package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
-import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.rpc.core.PeerRequiredLocalMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ResourceUnavailableException;
-import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientBootstrapRequestMessage;
-import tech.pegasys.teku.storage.client.CombinedChainDataClient;
+import tech.pegasys.teku.statetransition.lightclient.LightClientBootstrapProvider;
 
 public class LightClientBootstrapMessageHandler
     extends PeerRequiredLocalMessageHandler<
         LightClientBootstrapRequestMessage, LightClientBootstrap> {
 
-  private final Spec spec;
-  private final CombinedChainDataClient combinedChainDataClient;
+  private final LightClientBootstrapProvider lightClientBootstrapProvider;
 
   public LightClientBootstrapMessageHandler(
-      final Spec spec, final CombinedChainDataClient combinedChainDataClient) {
-    this.spec = spec;
-    this.combinedChainDataClient = combinedChainDataClient;
+      final LightClientBootstrapProvider lightClientBootstrapProvider) {
+    this.lightClientBootstrapProvider = lightClientBootstrapProvider;
   }
 
   @Override
@@ -51,14 +44,8 @@ public class LightClientBootstrapMessageHandler
     }
 
     final Bytes32 blockRoot = message.getBlockRoot();
-    combinedChainDataClient
-        .getBlockByBlockRoot(blockRoot)
-        .thenCompose(
-            maybeBlock ->
-                maybeBlock
-                    .filter(this::isWithinServableRange)
-                    .map(block -> createBootstrapIfFinalizedEpochBoundary(blockRoot, block))
-                    .orElse(SafeFuture.completedFuture(Optional.empty())))
+    lightClientBootstrapProvider
+        .getLightClientBootstrap(blockRoot)
         .finish(
             maybeBootstrap ->
                 maybeBootstrap.ifPresentOrElse(
@@ -69,47 +56,5 @@ public class LightClientBootstrapMessageHandler
                                 "No light client bootstrap available for block root "
                                     + blockRoot))),
             err -> handleError(err, callback, "light client bootstrap"));
-  }
-
-  private SafeFuture<Optional<LightClientBootstrap>> createBootstrapIfFinalizedEpochBoundary(
-      final Bytes32 blockRoot, final SignedBeaconBlock block) {
-    final UInt64 blockEpoch = spec.computeEpochAtSlot(block.getSlot());
-    final UInt64 boundaryEpoch =
-        spec.computeStartSlotAtEpoch(blockEpoch).equals(block.getSlot())
-            ? blockEpoch
-            : blockEpoch.plus(1);
-    if (!combinedChainDataClient.isFinalizedEpoch(boundaryEpoch)) {
-      return SafeFuture.completedFuture(Optional.empty());
-    }
-    return combinedChainDataClient
-        .getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(boundaryEpoch))
-        .thenCompose(
-            maybeBoundaryBlock ->
-                maybeBoundaryBlock
-                        .map(SignedBeaconBlock::getRoot)
-                        .filter(blockRoot::equals)
-                        .isPresent()
-                    ? createBootstrap(blockRoot, block)
-                    : SafeFuture.completedFuture(Optional.empty()));
-  }
-
-  private SafeFuture<Optional<LightClientBootstrap>> createBootstrap(
-      final Bytes32 blockRoot, final SignedBeaconBlock block) {
-    return combinedChainDataClient
-        .getStateByBlockRoot(blockRoot)
-        .thenApply(
-            maybeState ->
-                maybeState.flatMap(
-                    state ->
-                        spec.getLightClientUtil(block.getSlot())
-                            .map(util -> util.createLightClientBootstrap(state, block))));
-  }
-
-  private boolean isWithinServableRange(final SignedBeaconBlock block) {
-    final UInt64 currentEpoch =
-        combinedChainDataClient.getRecentChainData().getCurrentEpoch().orElse(UInt64.ZERO);
-    final UInt64 minEpoch =
-        currentEpoch.minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
-    return spec.computeEpochAtSlot(block.getSlot()).isGreaterThanOrEqualTo(minEpoch);
   }
 }

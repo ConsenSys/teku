@@ -90,6 +90,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarArchiveReconstructor;
 import tech.pegasys.teku.statetransition.datacolumns.log.rpc.DasReqRespLogger;
+import tech.pegasys.teku.statetransition.lightclient.LightClientBootstrapProvider;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -314,7 +315,9 @@ public class BeaconChainMethods {
             BeaconChainMethodIds.LIGHT_CLIENT_BOOTSTRAP,
             LightClientBootstrapRequestMessage.SSZ_SCHEMA,
             ForkDigestPayloadContext.LIGHT_CLIENT_BOOTSTRAP,
-            __ -> new LightClientBootstrapMessageHandler(spec, combinedChainDataClient)));
+            __ ->
+                new LightClientBootstrapMessageHandler(
+                    new LightClientBootstrapProvider(spec, combinedChainDataClient))));
   }
 
   private static Eth2RpcMethod<StatusMessage, StatusMessage> createStatus(
