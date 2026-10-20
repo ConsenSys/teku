@@ -862,6 +862,10 @@ public abstract class RecentChainData
     return store == null ? Optional.empty() : Optional.of(store.getFinalizedCheckpoint());
   }
 
+  public Optional<AnchorPoint> getLatestFinalized() {
+    return store == null ? Optional.empty() : Optional.of(store.getLatestFinalized());
+  }
+
   public Optional<Checkpoint> getJustifiedCheckpoint() {
     return store == null ? Optional.empty() : Optional.of(store.getJustifiedCheckpoint());
   }
