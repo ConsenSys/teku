@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
@@ -214,6 +215,32 @@ public class CombinedChainDataClient {
                 maybeBlock
                     .map(this::getStateForBlock)
                     .orElseGet(() -> SafeFuture.completedFuture(Optional.empty())));
+  }
+
+  /**
+   * Returns the fork choice node on the canonical chain that is in effect at {@code slot}: the
+   * chain head if it is at or before {@code slot}, otherwise the head chain's ancestor at that
+   * slot.
+   *
+   * <p>From Gloas the node carries the payload variant (FULL or EMPTY) that the canonical chain
+   * builds on, which a block root alone cannot express. The node data, including its optimistic
+   * status, is captured from a single fork choice snapshot.
+   *
+   * @return the node in effect at {@code slot}, or empty if there is no chain head yet or {@code
+   *     slot} is before the fork choice anchor
+   */
+  public Optional<ProtoNodeData> getForkChoiceNodeInEffectAtSlot(final UInt64 slot) {
+    return recentChainData
+        .getChainHead()
+        .flatMap(
+            head ->
+                recentChainData
+                    .getForkChoiceStrategy()
+                    // Resolves to the head node itself when the head is at or before the slot
+                    .flatMap(
+                        forkChoiceStrategy ->
+                            forkChoiceStrategy.getAncestorNodeData(
+                                head.getForkChoiceNode(), slot)));
   }
 
   /**

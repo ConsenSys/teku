@@ -95,6 +95,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -588,8 +589,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
             .thenApply(__ -> getAttestationHeadNode(slot))
             .thenCompose(
                 selectedHead ->
-                    getAttestationHeadBlockAndState(
-                            slot, selectedHead.map(AttestationHeadSelection::forkChoiceNode))
+                    getAttestationHeadBlockAndState(slot, selectedHead)
                         .thenCompose(
                             maybeBlockAndState -> {
                               if (maybeBlockAndState.isEmpty()) {
@@ -598,7 +598,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                               final SignedBlockAndState blockAndState = maybeBlockAndState.get();
                               // The head block must not be optimistically synced.
                               if (selectedHead
-                                  .map(AttestationHeadSelection::optimistic)
+                                  .map(ProtoNodeData::isOptimistic)
                                   .orElseGet(
                                       () ->
                                           combinedChainDataClient.isOptimisticBlock(
@@ -611,20 +611,20 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                                   slot,
                                   committeeIndex,
                                   blockAndState,
-                                  selectedHead.map(AttestationHeadSelection::forkChoiceNode));
+                                  selectedHead.map(ProtoNodeData::getForkChoiceNode));
                             }));
     result.always(context::stopTimer);
     return result;
   }
 
   private SafeFuture<Optional<SignedBlockAndState>> getAttestationHeadBlockAndState(
-      final UInt64 slot, final Optional<ForkChoiceNode> selectedHead) {
+      final UInt64 slot, final Optional<ProtoNodeData> selectedHead) {
     if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
       return combinedChainDataClient.getSignedBlockAndStateInEffectAtSlot(slot);
     }
 
     return selectedHead
-        .map(node -> combinedChainDataClient.getStore().retrieveBlockAndState(node.blockRoot()))
+        .map(node -> combinedChainDataClient.getStore().retrieveBlockAndState(node.getRoot()))
         .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
 
@@ -658,34 +658,14 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     return SafeFuture.completedFuture(Optional.of(attestationData));
   }
 
-  private Optional<AttestationHeadSelection> getAttestationHeadNode(final UInt64 slot) {
+  private Optional<ProtoNodeData> getAttestationHeadNode(final UInt64 slot) {
     if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
       return Optional.empty();
     }
-    return combinedChainDataClient
-        .getChainHead()
-        .flatMap(
-            head -> {
-              if (head.getSlot().isLessThanOrEqualTo(slot)) {
-                return Optional.of(
-                    new AttestationHeadSelection(head.getForkChoiceNode(), head.isOptimistic()));
-              }
-              // Preserve the payload variant selected by the canonical descendant. Slots before
-              // the fork choice anchor have no known variant, so no attestation data is produced.
-              return combinedChainDataClient
-                  .getStore()
-                  .getForkChoiceStrategy()
-                  .getAncestorNodeData(head.getForkChoiceNode(), slot)
-                  .map(
-                      ancestorData ->
-                          new AttestationHeadSelection(
-                              new ForkChoiceNode(
-                                  ancestorData.getRoot(), ancestorData.getPayloadStatus()),
-                              ancestorData.isOptimistic()));
-            });
+    // Preserve the payload variant selected by the canonical chain. Slots before the fork choice
+    // anchor have no known variant, so no attestation data is produced.
+    return combinedChainDataClient.getForkChoiceNodeInEffectAtSlot(slot);
   }
-
-  private record AttestationHeadSelection(ForkChoiceNode forkChoiceNode, boolean optimistic) {}
 
   private AttestationData createAttestationData(
       final BeaconBlock block,
