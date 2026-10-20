@@ -150,7 +150,7 @@ dependencyManagement {
 			entry "junit-jupiter"
 		}
 
-		dependency 'io.consensys.protocols:discovery:26.10.0'
+		dependency 'io.consensys.protocols:discovery:26.10.1'
 
 		dependencySet(group: 'org.jupnp', version: '3.0.5') {
 			entry "org.jupnp"
