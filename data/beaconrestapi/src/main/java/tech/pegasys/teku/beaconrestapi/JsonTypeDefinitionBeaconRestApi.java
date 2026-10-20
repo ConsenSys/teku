@@ -55,8 +55,6 @@ import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetFinalizedBlockRoot;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetFinalizedCheckpointState;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetGenesis;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetProposerSlashings;
-import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateBuilderPendingPayments;
-import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateBuilderPendingWithdrawals;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateCommittees;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateFinalityCheckpoints;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateFork;
@@ -275,8 +273,6 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
             .endpoint(new GetStatePendingDeposits(dataProvider, schemaCache))
             .endpoint(new GetStatePendingPartialWithdrawals(dataProvider, schemaCache))
             .endpoint(new GetStateProposerLookahead(dataProvider, schemaCache))
-            .endpoint(new GetStateBuilderPendingWithdrawals(dataProvider, schemaCache))
-            .endpoint(new GetStateBuilderPendingPayments(dataProvider, schemaCache))
             // Event Handler
             .endpoint(
                 new GetEvents(

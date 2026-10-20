@@ -233,7 +233,19 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
       final boolean useMockForkChoice,
       final SpecMilestone specMilestone,
       final boolean storeNonCanonicalBlocks) {
-    this.spec = TestSpecFactory.createMinimal(specMilestone);
+    setupStorage(
+        storageMode,
+        useMockForkChoice,
+        TestSpecFactory.createMinimal(specMilestone),
+        storeNonCanonicalBlocks);
+  }
+
+  private void setupStorage(
+      final StateStorageMode storageMode,
+      final boolean useMockForkChoice,
+      final Spec spec,
+      final boolean storeNonCanonicalBlocks) {
+    this.spec = spec;
     this.specConfig = spec.getGenesisSpecConfig();
     this.storageSystem =
         InMemoryStorageSystemBuilder.create()
@@ -365,6 +377,12 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
 
   protected void startRestAPIAtGenesis(final SpecMilestone specMilestone) {
     startRestAPIAtGenesis(StateStorageMode.ARCHIVE, specMilestone, CONFIG);
+  }
+
+  protected void startRestAPIAtGenesis(final Spec spec) {
+    setupStorage(StateStorageMode.ARCHIVE, false, spec, false);
+    chainUpdater.initializeGenesis();
+    setupAndStartRestAPI();
   }
 
   protected void startRestAPIAtGenesis(

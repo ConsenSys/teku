@@ -16,6 +16,7 @@ package tech.pegasys.teku.beaconrestapi.v1.beacon;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.http.ContentTypes.OCTET_STREAM;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 
@@ -30,7 +31,9 @@ import tech.pegasys.teku.infrastructure.json.JsonTestUtil;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.ssz.SszVector;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
@@ -73,7 +76,7 @@ public class GetStateBuilderPendingPaymentsIntegrationTest
 
   @Test
   public void shouldReturnBadRequestBeforeGloas() throws Exception {
-    startRestAPIAtGenesis(SpecMilestone.FULU);
+    startRestAPIAtGenesis(TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.valueOf(10)));
     createBlocksAtSlots(10);
 
     final Response response = get("head");
@@ -81,6 +84,15 @@ public class GetStateBuilderPendingPaymentsIntegrationTest
     assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
     assertThat(response.body().string())
         .contains("prior to GLOAS and does not contain builder pending payments");
+  }
+
+  @Test
+  public void shouldNotRegisterEndpointWithoutGloasSupport() throws Exception {
+    startRestAPIAtGenesis(SpecMilestone.FULU);
+
+    try (final Response response = get("head")) {
+      assertThat(response.code()).isEqualTo(SC_NOT_FOUND);
+    }
   }
 
   public Response get(final String stateId) throws IOException {
