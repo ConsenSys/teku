@@ -269,9 +269,6 @@ class ValidatorApiHandlerTest {
         .when(blockProductionPerformanceFactory)
         .createForProduction(any());
     when(chainDataClient.getStore()).thenReturn(store);
-    // Gloas attestation data asks fork choice whether the block's payload is verified; the plain
-    // mock tracks no FULL node, so the attestation committee index stays 0.
-    when(store.getForkChoiceStrategy()).thenReturn(forkChoiceStrategy);
     when(syncStateProvider.getCurrentSyncState()).thenReturn(SyncState.IN_SYNC);
     when(forkChoiceTrigger.prepareForBlockProduction(any(), any()))
         .thenReturn(SafeFuture.completedFuture(chainHead));
