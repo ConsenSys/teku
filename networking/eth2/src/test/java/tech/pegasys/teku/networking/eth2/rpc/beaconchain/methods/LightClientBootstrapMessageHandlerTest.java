@@ -16,6 +16,7 @@ package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -72,6 +73,9 @@ class LightClientBootstrapMessageHandlerTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getBlock())));
     when(combinedChainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getState())));
+    when(combinedChainDataClient.isFinalizedEpoch(UInt64.ONE)).thenReturn(true);
+    when(combinedChainDataClient.getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(UInt64.ONE)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getBlock())));
   }
 
   @Test
@@ -110,6 +114,28 @@ class LightClientBootstrapMessageHandlerTest {
     handler.onIncomingMessage(PROTOCOL_ID, peer, request(blockAndState.getRoot()), callback);
 
     assertResourceUnavailable();
+  }
+
+  @Test
+  void shouldRespondResourceUnavailableWhenEpochBoundaryNotFinalized() {
+    when(combinedChainDataClient.isFinalizedEpoch(UInt64.ONE)).thenReturn(false);
+
+    handler.onIncomingMessage(PROTOCOL_ID, peer, request(blockAndState.getRoot()), callback);
+
+    assertResourceUnavailable();
+    verify(combinedChainDataClient, never()).getStateByBlockRoot(any());
+  }
+
+  @Test
+  void shouldRespondResourceUnavailableWhenBlockIsNotEpochBoundary() {
+    final SignedBlockAndState laterBlock = chainBuilder.generateBlockAtSlot(2);
+    when(combinedChainDataClient.getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(UInt64.ONE)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(laterBlock.getBlock())));
+
+    handler.onIncomingMessage(PROTOCOL_ID, peer, request(blockAndState.getRoot()), callback);
+
+    assertResourceUnavailable();
+    verify(combinedChainDataClient, never()).getStateByBlockRoot(any());
   }
 
   @Test

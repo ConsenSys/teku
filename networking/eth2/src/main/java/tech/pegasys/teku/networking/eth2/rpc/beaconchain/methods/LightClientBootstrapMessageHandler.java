@@ -57,7 +57,7 @@ public class LightClientBootstrapMessageHandler
             maybeBlock ->
                 maybeBlock
                     .filter(this::isWithinServableRange)
-                    .map(block -> createBootstrap(blockRoot, block))
+                    .map(block -> createBootstrapIfFinalizedEpochBoundary(blockRoot, block))
                     .orElse(SafeFuture.completedFuture(Optional.empty())))
         .finish(
             maybeBootstrap ->
@@ -69,6 +69,28 @@ public class LightClientBootstrapMessageHandler
                                 "No light client bootstrap available for block root "
                                     + blockRoot))),
             err -> handleError(err, callback, "light client bootstrap"));
+  }
+
+  private SafeFuture<Optional<LightClientBootstrap>> createBootstrapIfFinalizedEpochBoundary(
+      final Bytes32 blockRoot, final SignedBeaconBlock block) {
+    final UInt64 blockEpoch = spec.computeEpochAtSlot(block.getSlot());
+    final UInt64 boundaryEpoch =
+        spec.computeStartSlotAtEpoch(blockEpoch).equals(block.getSlot())
+            ? blockEpoch
+            : blockEpoch.plus(1);
+    if (!combinedChainDataClient.isFinalizedEpoch(boundaryEpoch)) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    return combinedChainDataClient
+        .getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(boundaryEpoch))
+        .thenCompose(
+            maybeBoundaryBlock ->
+                maybeBoundaryBlock
+                        .map(SignedBeaconBlock::getRoot)
+                        .filter(blockRoot::equals)
+                        .isPresent()
+                    ? createBootstrap(blockRoot, block)
+                    : SafeFuture.completedFuture(Optional.empty()));
   }
 
   private SafeFuture<Optional<LightClientBootstrap>> createBootstrap(

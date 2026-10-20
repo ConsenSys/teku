@@ -137,8 +137,15 @@ public class LightClientReqRespIntegrationTest {
   }
 
   @Test
-  public void shouldReturnBootstrapForKnownBlock() throws Exception {
-    final SignedBlockAndState blockAndState = server.getChainUpdater().advanceChain(1);
+  public void shouldReturnBootstrapForFinalizedEpochBoundaryBlock() throws Exception {
+    server.getChainUpdater().advanceChain(1);
+    server
+        .getChainUpdater()
+        .updateBestBlock(
+            server
+                .getChainUpdater()
+                .advanceChain(spec.computeStartSlotAtEpoch(UInt64.ONE).plus(1)));
+    final SignedBlockAndState blockAndState = server.getChainUpdater().finalizeEpoch(1);
 
     final LightClientBootstrap bootstrap =
         waitFor(serverPeer.requestLightClientBootstrap(blockAndState.getRoot()));
