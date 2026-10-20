@@ -88,6 +88,11 @@ public class LocalSlashingProtector implements SlashingProtector {
     return loaded;
   }
 
+  @Override
+  public synchronized void evictSigningRecord(final BLSPublicKey validator) {
+    signingRecords.remove(validator);
+  }
+
   private ValidatorSigningRecord loadOrCreateSigningRecord(
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) throws IOException {
     final Optional<ValidatorSigningRecord> record = getSigningRecord(validator);
