@@ -22,16 +22,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
-import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.CoreTypes;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
@@ -39,7 +37,6 @@ import tech.pegasys.teku.infrastructure.json.types.StringValueTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.validator.client.restapi.ValidatorTypes;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
-import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderEntry;
 
 public class RuntimeProposerConfig {
   private final Optional<Path> storagePath;
@@ -215,34 +212,29 @@ public class RuntimeProposerConfig {
     private static ProposerConfig.BuilderConfig createBuilder(
         final Optional<UInt64> gasLimit, final Optional<BuilderConfig> builderConfig) {
       if (gasLimit.isPresent() || builderConfig.isPresent()) {
-        final Optional<Map<String, ProposerConfig.BuilderOverrides>> urls =
+        final Optional<List<ProposerConfig.BuilderEntry>> builders =
             builderConfig
                 .flatMap(BuilderConfig::builders)
                 .map(
-                    builders ->
-                        builders.stream()
-                            .collect(
-                                Collectors.toMap(
-                                    BuilderEntry::url,
-                                    builderEntry ->
-                                        new ProposerConfig.BuilderOverrides(
-                                            builderEntry.authData().orElse(null),
-                                            builderEntry.builderPubkeys().orElse(null),
-                                            builderEntry.minBid().orElse(null),
-                                            builderEntry.builderBoostFactor().orElse(null),
-                                            builderEntry.maxExecutionPayment().orElse(null)),
-                                    (__, ___) -> {
-                                      throw new InvalidConfigurationException(
-                                          "builders contain duplicate url");
-                                    },
-                                    LinkedHashMap::new)));
+                    builderEntries ->
+                        builderEntries.stream()
+                            .map(
+                                builderEntry ->
+                                    new ProposerConfig.BuilderEntry(
+                                        builderEntry.url(),
+                                        builderEntry.authData().orElse(null),
+                                        builderEntry.builderPubkeys().orElse(null),
+                                        builderEntry.minBid().orElse(null),
+                                        builderEntry.builderBoostFactor().orElse(null),
+                                        builderEntry.maxExecutionPayment().orElse(null)))
+                            .toList());
         return new ProposerConfig.BuilderConfig(
             null,
             gasLimit.orElse(null),
             null,
             builderConfig.flatMap(BuilderConfig::minBid).orElse(null),
             builderConfig.flatMap(BuilderConfig::builderBoostFactor).orElse(null),
-            urls.orElse(null));
+            builders.orElse(null));
       } else {
         return null;
       }

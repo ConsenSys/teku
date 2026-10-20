@@ -28,7 +28,6 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.validator.client.ProposerConfigManager;
-import tech.pegasys.teku.validator.client.SetBuilderConfigException;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
 
 public class SetBuilderConfig extends RestApiEndpoint {
@@ -76,7 +75,7 @@ public class SetBuilderConfig extends RestApiEndpoint {
 
     try {
       manager.setBuilderConfig(publicKey, body);
-    } catch (final SetBuilderConfigException | InvalidConfigurationException e) {
+    } catch (final IllegalArgumentException | InvalidConfigurationException e) {
       request.respondError(SC_BAD_REQUEST, e.getMessage());
       return;
     }

@@ -43,7 +43,7 @@ import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
-import tech.pegasys.teku.validator.client.ProposerConfig.BuilderOverrides;
+import tech.pegasys.teku.validator.client.ProposerConfig.BuilderEntry;
 import tech.pegasys.teku.validator.client.ProposerConfig.RegistrationOverrides;
 import tech.pegasys.teku.validator.client.ResolvedBuilderConfig.ResolvedBuilderEntry;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
@@ -219,13 +219,13 @@ public class ProposerConfigManagerTest {
             .isEqualTo(randomBoostFactor);
       }
       case BUILDER_URLS -> {
-        final BuilderOverrides overrides = randomBuilderOverrides();
-        prepareConfigWithValidatorSpecificProperty(property, Map.of(BUILDER_URL, overrides), true);
+        final BuilderEntry builder = randomBuilderEntry();
+        prepareConfigWithValidatorSpecificProperty(property, List.of(builder), true);
         assertThat(
                 proposerConfigManager
                     .resolveBuilderConfig(validatorInConfig.getPublicKey())
                     .builders())
-            .containsExactly(expectedBuilderEntry(overrides));
+            .containsExactly(expectedBuilderEntry(builder));
       }
     }
   }
@@ -300,13 +300,13 @@ public class ProposerConfigManagerTest {
             .isEqualTo(randomBoostFactor);
       }
       case BUILDER_URLS -> {
-        final BuilderOverrides overrides = randomBuilderOverrides();
-        prepareConfigWithDefaultConfigProperty(property, Map.of(BUILDER_URL, overrides));
+        final BuilderEntry builder = randomBuilderEntry();
+        prepareConfigWithDefaultConfigProperty(property, List.of(builder));
         assertThat(
                 proposerConfigManager
                     .resolveBuilderConfig(validatorNotInConfig.getPublicKey())
                     .builders())
-            .containsExactly(expectedBuilderEntry(overrides));
+            .containsExactly(expectedBuilderEntry(builder));
       }
     }
   }
@@ -347,7 +347,7 @@ public class ProposerConfigManagerTest {
                         null,
                         keyMinBid,
                         keyBoostFactor,
-                        Map.of(BUILDER_URL, new BuilderOverrides(null, null, null, null, null))))),
+                        List.of(builderEntry(BUILDER_URL))))),
             new ProposerConfig.Config(defaultFeeRecipientConfig, null));
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -438,7 +438,7 @@ public class ProposerConfigManagerTest {
                             new ProposerConfig.Config(
                                 null,
                                 new ProposerConfig.BuilderConfig(
-                                    null, null, null, null, null, Map.of()))),
+                                    null, null, null, null, null, List.of()))),
                         new ProposerConfig.Config(
                             defaultFeeRecipientConfig,
                             new ProposerConfig.BuilderConfig(
@@ -447,7 +447,7 @@ public class ProposerConfigManagerTest {
                                 null,
                                 null,
                                 null,
-                                Map.of(defaultBuilderUrl, BuilderOverrides.EMPTY)))))));
+                                List.of(builderEntry(defaultBuilderUrl))))))));
     setUpProposerConfigManager(Optional.empty(), Optional.empty());
 
     assertThat(
@@ -470,7 +470,7 @@ public class ProposerConfigManagerTest {
                         new ProposerConfig.Config(
                             defaultFeeRecipientConfig,
                             new ProposerConfig.BuilderConfig(
-                                true, null, null, null, null, Map.of()))))));
+                                true, null, null, null, null, List.of()))))));
     setUpProposerConfigManager(Optional.empty(), Optional.empty());
 
     assertThat(
@@ -489,12 +489,7 @@ public class ProposerConfigManagerTest {
                 new ProposerConfig.Config(
                     null,
                     new ProposerConfig.BuilderConfig(
-                        false,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of(BUILDER_URL, new BuilderOverrides(null, null, null, null, null))))),
+                        false, null, null, null, null, List.of(builderEntry(BUILDER_URL))))),
             new ProposerConfig.Config(defaultFeeRecipientConfig, null));
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -518,12 +513,7 @@ public class ProposerConfigManagerTest {
             new ProposerConfig.Config(
                 defaultFeeRecipientConfig,
                 new ProposerConfig.BuilderConfig(
-                    true,
-                    null,
-                    null,
-                    null,
-                    null,
-                    Map.of(BUILDER_URL, new BuilderOverrides(null, null, null, null, null)))));
+                    true, null, null, null, null, List.of(builderEntry(BUILDER_URL)))));
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
     setUpProposerConfigManager(Optional.empty(), Optional.empty());
@@ -944,17 +934,22 @@ public class ProposerConfigManagerTest {
                   isDefault ? true : null, null, null, null, (UInt64) value, null));
       case BUILDER_URLS -> {
         @SuppressWarnings("unchecked")
-        final Map<String, BuilderOverrides> urls = (Map<String, BuilderOverrides>) value;
+        final List<BuilderEntry> builders = (List<BuilderEntry>) value;
         yield new ProposerConfig.Config(
             isDefault ? defaultFeeRecipientConfig : null,
             new ProposerConfig.BuilderConfig(
-                isDefault ? true : null, null, null, null, null, urls));
+                isDefault ? true : null, null, null, null, null, builders));
       }
     };
   }
 
-  private BuilderOverrides randomBuilderOverrides() {
-    return new BuilderOverrides(
+  private static BuilderEntry builderEntry(final String url) {
+    return new BuilderEntry(url, null, null, null, null, null);
+  }
+
+  private BuilderEntry randomBuilderEntry() {
+    return new BuilderEntry(
+        BUILDER_URL,
         dataStructureUtil.randomBytes(32),
         List.of(dataStructureUtil.randomPublicKey()),
         dataStructureUtil.randomUInt64(),
@@ -962,15 +957,14 @@ public class ProposerConfigManagerTest {
         dataStructureUtil.randomUInt64());
   }
 
-  private ResolvedBuilderEntry expectedBuilderEntry(final BuilderOverrides overrides)
-      throws IOException {
+  private static ResolvedBuilderEntry expectedBuilderEntry(final BuilderEntry builder) {
     return new ResolvedBuilderEntry(
-        URI.create(BUILDER_URL).toURL(),
-        overrides.getAuthData(),
-        overrides.getBuilderPubkeys().orElseThrow(),
-        overrides.getMaxExecutionPayment().orElseThrow(),
-        overrides.getMinBid().orElseThrow(),
-        overrides.getBuilderBoostFactor().orElseThrow());
+        builder.getUrl(),
+        builder.getAuthData(),
+        builder.getBuilderPubkeys().orElseThrow(),
+        builder.getMaxExecutionPayment().orElseThrow(),
+        builder.getMinBid().orElseThrow(),
+        builder.getBuilderBoostFactor().orElseThrow());
   }
 
   private void proposerWithRuntimeConfiguration(final Path tempDir) throws IOException {
