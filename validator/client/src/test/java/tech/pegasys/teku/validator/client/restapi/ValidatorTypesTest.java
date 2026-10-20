@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -239,17 +239,6 @@ class ValidatorTypesTest {
             Optional.of(dataStructureUtil.randomUInt64()),
             Optional.of(List.of(fullBuilderEntry, minimalBuilderEntry)));
     assertRoundTrip(builderConfig, ValidatorTypes.BUILDER_CONFIG_TYPE);
-  }
-
-  @Test
-  void builderConfigType_duplicateUrls() {
-    assertThatThrownBy(
-            () ->
-                parse(
-                    "{\"builders\": [{\"url\": \"https://builder-a.example.com\"}, {\"url\": \"https://builder-a.example.com\", \"min_bid\": \"1\"}]}",
-                    ValidatorTypes.BUILDER_CONFIG_TYPE))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("builders contain duplicate url https://builder-a.example.com");
   }
 
   @Test

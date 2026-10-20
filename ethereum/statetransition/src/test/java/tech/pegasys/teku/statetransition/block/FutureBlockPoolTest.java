@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -41,6 +41,17 @@ class FutureBlockPoolTest {
   private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
   private final UInt64 currentSlot = UInt64.valueOf(5);
   private final Map<SignedBeaconBlock, Long> blockSizes = new HashMap<>();
+
+  @Test
+  void isBeyondFutureSlotTolerance_shouldAllowUpToTolerance() {
+    final UInt64 lastAccepted = currentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE);
+
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(currentSlot, currentSlot)).isFalse();
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(lastAccepted, currentSlot)).isFalse();
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(lastAccepted.plus(1), currentSlot))
+        .isTrue();
+    assertThat(FutureBlockPool.isBeyondFutureSlotTolerance(UInt64.MAX_VALUE, currentSlot)).isTrue();
+  }
 
   @Test
   void add_acceptsBlocksUpToTolerance() {

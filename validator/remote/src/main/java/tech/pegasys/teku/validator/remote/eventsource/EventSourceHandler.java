@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -12,8 +12,6 @@
  */
 
 package tech.pegasys.teku.validator.remote.eventsource;
-
-import static tech.pegasys.teku.infrastructure.logging.ValidatorLogger.VALIDATOR_LOGGER;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.common.base.Throwables;
@@ -28,6 +26,7 @@ import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
+import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
@@ -39,11 +38,33 @@ class EventSourceHandler implements BackgroundEventHandler {
   private static final Logger LOG = LogManager.getLogger();
 
   private final ValidatorTimingChannel validatorTimingChannel;
+  private final LabelledMetric<Counter> eventCounter;
   private final Counter disconnectCounter;
   private final Counter invalidEventCounter;
   private final Counter timeoutCounter;
   private final Counter errorCounter;
   private final boolean generateEarlyAttestations;
+  private final ValidatorLogger validatorLogger;
+  private final String beaconNodeEndpoint;
+
+  // The event source dispatches every callback on a single thread, so the connection state below
+  // does not need to be thread safe.
+
+  /**
+   * Whether a stream to this beacon node is currently open. Only a stream which was opened and then
+   * failed tells us anything about the events the beacon node delivers: never reaching the node at
+   * all is reported elsewhere.
+   */
+  private boolean connected = false;
+
+  /**
+   * Whether the current connection has delivered a head or head_v2 event. A beacon node which does
+   * not accept the subscription still accepts the connection, so a stream which connects and then
+   * never delivers anything is the only symptom, and without this it would leave the validator
+   * client silently running on timer driven duties alone. A handler belongs to a single beacon
+   * node, so one node failing to deliver events says nothing about the others.
+   */
+  private boolean headEventReceivedSinceConnected = false;
 
   private final Spec spec;
 
@@ -51,8 +72,16 @@ class EventSourceHandler implements BackgroundEventHandler {
       final ValidatorTimingChannel validatorTimingChannel,
       final MetricsSystem metricsSystem,
       final boolean generateEarlyAttestations,
-      final Spec spec) {
+      final Spec spec,
+      final ValidatorLogger validatorLogger,
+      final String beaconNodeEndpoint) {
     this.validatorTimingChannel = validatorTimingChannel;
+    eventCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.VALIDATOR,
+            "event_stream_events_total",
+            "Event stream events processed, by event type",
+            "type");
     invalidEventCounter =
         metricsSystem.createCounter(
             TekuMetricCategory.VALIDATOR,
@@ -70,11 +99,15 @@ class EventSourceHandler implements BackgroundEventHandler {
     errorCounter = eventSourceMetrics.labels("error");
     this.generateEarlyAttestations = generateEarlyAttestations;
     this.spec = spec;
+    this.validatorLogger = validatorLogger;
+    this.beaconNodeEndpoint = beaconNodeEndpoint;
   }
 
   @Override
   public void onOpen() {
-    VALIDATOR_LOGGER.connectedToBeaconNodeEventStream();
+    connected = true;
+    headEventReceivedSinceConnected = false;
+    validatorLogger.connectedToBeaconNodeEventStream();
     // We might have missed some events while connecting or reconnected so ensure the duties are
     // recalculated
     validatorTimingChannel.onPossibleMissedEvents();
@@ -92,12 +125,22 @@ class EventSourceHandler implements BackgroundEventHandler {
     try {
       final EventType eventType = EventType.valueOf(event);
       switch (eventType) {
-        case head -> handleHeadEvent(messageEvent.getData());
-        case head_v2 -> handleHeadV2Event(messageEvent.getData());
+        case head -> {
+          handleHeadEvent(messageEvent.getData());
+          headEventReceivedSinceConnected = true;
+        }
+        case head_v2 -> {
+          handleHeadV2Event(messageEvent.getData());
+          headEventReceivedSinceConnected = true;
+        }
         case attester_slashing -> handleAttesterSlashingEvent(messageEvent.getData());
         case proposer_slashing -> handleProposerSlashingEvent(messageEvent.getData());
-        default -> LOG.warn("Received unexpected event type: " + event);
+        default -> {
+          LOG.warn("Received unexpected event type: " + event);
+          return;
+        }
       }
+      eventCounter.labels(eventType.name()).inc();
     } catch (final IllegalArgumentException | JsonProcessingException e) {
       invalidEventCounter.inc();
       LOG.warn(
@@ -151,14 +194,22 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   @Override
   public void onError(final Throwable t) {
+    if (connected) {
+      connected = false;
+      warnIfNoHeadEventsWereReceived();
+    }
     if (Throwables.getRootCause(t) instanceof SocketTimeoutException) {
       timeoutCounter.inc();
-      LOG.info(
-          "Timed out waiting for events from beacon node event stream. "
-              + "Reconnecting. This is normal if the beacon node is still syncing.");
+      LOG.info("Timed out waiting for events from beacon node event stream. Reconnecting.");
     } else {
       errorCounter.inc();
-      VALIDATOR_LOGGER.beaconNodeEventStreamConnectionError();
+      validatorLogger.beaconNodeEventStreamConnectionError();
+    }
+  }
+
+  private void warnIfNoHeadEventsWereReceived() {
+    if (!headEventReceivedSinceConnected) {
+      validatorLogger.noHeadEventsReceivedFromBeaconNodeEventStream(beaconNodeEndpoint);
     }
   }
 }
