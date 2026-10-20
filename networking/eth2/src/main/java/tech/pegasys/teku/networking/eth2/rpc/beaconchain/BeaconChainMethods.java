@@ -18,12 +18,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
-import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.networking.eth2.peers.PeerLookup;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BeaconBlocksByRangeMessageHandler;
@@ -265,28 +263,10 @@ public class BeaconChainMethods {
             spec, asyncRunner, peerLookup, rpcEncoding, combinedChainDataClient, metricsSystem),
         createMetadata(spec, asyncRunner, metadataMessagesFactory, peerLookup, rpcEncoding),
         createPing(asyncRunner, metadataMessagesFactory, peerLookup, rpcEncoding),
-        createLightClientLatestUpdate(
-            spec,
-            asyncRunner,
-            peerLookup,
-            rpcEncoding,
-            recentChainData,
-            lightClientUpdateStore,
-            BeaconChainMethodIds.LIGHT_CLIENT_FINALITY_UPDATE,
-            ForkDigestPayloadContext.LIGHT_CLIENT_FINALITY_UPDATE,
-            LightClientUpdateStore::getLatestFinalityUpdate,
-            "light client finality update"),
-        createLightClientLatestUpdate(
-            spec,
-            asyncRunner,
-            peerLookup,
-            rpcEncoding,
-            recentChainData,
-            lightClientUpdateStore,
-            BeaconChainMethodIds.LIGHT_CLIENT_OPTIMISTIC_UPDATE,
-            ForkDigestPayloadContext.LIGHT_CLIENT_OPTIMISTIC_UPDATE,
-            LightClientUpdateStore::getLatestOptimisticUpdate,
-            "light client optimistic update"),
+        createLightClientFinalityUpdate(
+            spec, asyncRunner, peerLookup, rpcEncoding, recentChainData, lightClientUpdateStore),
+        createLightClientOptimisticUpdate(
+            spec, asyncRunner, peerLookup, rpcEncoding, recentChainData, lightClientUpdateStore),
         createLightClientUpdatesByRange(
             spec, asyncRunner, peerLookup, rpcEncoding, recentChainData, lightClientUpdateStore),
         createLightClientBootstrap(
@@ -816,37 +796,65 @@ public class BeaconChainMethods {
         peerLookup);
   }
 
-  private static <T extends SszData>
-      Optional<Eth2RpcMethod<EmptyMessage, T>> createLightClientLatestUpdate(
+  private static Optional<Eth2RpcMethod<EmptyMessage, LightClientFinalityUpdate>>
+      createLightClientFinalityUpdate(
           final Spec spec,
           final AsyncRunner asyncRunner,
           final PeerLookup peerLookup,
           final RpcEncoding rpcEncoding,
           final RecentChainData recentChainData,
-          final Optional<LightClientUpdateStore> lightClientUpdateStore,
-          final String methodId,
-          final ForkDigestPayloadContext<T> payloadContext,
-          final Function<LightClientUpdateStore, Optional<T>> latestUpdate,
-          final String updateType) {
+          final Optional<LightClientUpdateStore> lightClientUpdateStore) {
     if (!spec.isMilestoneSupported(SpecMilestone.ALTAIR)) {
       return Optional.empty();
     }
 
-    final RpcContextCodec<Bytes4, T> forkDigestContextCodec =
-        RpcContextCodec.forkDigest(spec, recentChainData, payloadContext);
+    final RpcContextCodec<Bytes4, LightClientFinalityUpdate> forkDigestContextCodec =
+        RpcContextCodec.forkDigest(
+            spec, recentChainData, ForkDigestPayloadContext.LIGHT_CLIENT_FINALITY_UPDATE);
 
     return lightClientUpdateStore.map(
         store ->
-            new SingleProtocolEth2RpcMethod<EmptyMessage, T>(
+            new SingleProtocolEth2RpcMethod<EmptyMessage, LightClientFinalityUpdate>(
                 asyncRunner,
-                methodId,
+                BeaconChainMethodIds.LIGHT_CLIENT_FINALITY_UPDATE,
                 1,
                 rpcEncoding,
                 EmptyMessage.SSZ_SCHEMA,
                 true,
                 forkDigestContextCodec,
                 new LightClientLatestUpdateMessageHandler<>(
-                    updateType, () -> latestUpdate.apply(store)),
+                    "light client finality update", store::getLatestFinalityUpdate),
+                peerLookup));
+  }
+
+  private static Optional<Eth2RpcMethod<EmptyMessage, LightClientOptimisticUpdate>>
+      createLightClientOptimisticUpdate(
+          final Spec spec,
+          final AsyncRunner asyncRunner,
+          final PeerLookup peerLookup,
+          final RpcEncoding rpcEncoding,
+          final RecentChainData recentChainData,
+          final Optional<LightClientUpdateStore> lightClientUpdateStore) {
+    if (!spec.isMilestoneSupported(SpecMilestone.ALTAIR)) {
+      return Optional.empty();
+    }
+
+    final RpcContextCodec<Bytes4, LightClientOptimisticUpdate> forkDigestContextCodec =
+        RpcContextCodec.forkDigest(
+            spec, recentChainData, ForkDigestPayloadContext.LIGHT_CLIENT_OPTIMISTIC_UPDATE);
+
+    return lightClientUpdateStore.map(
+        store ->
+            new SingleProtocolEth2RpcMethod<EmptyMessage, LightClientOptimisticUpdate>(
+                asyncRunner,
+                BeaconChainMethodIds.LIGHT_CLIENT_OPTIMISTIC_UPDATE,
+                1,
+                rpcEncoding,
+                EmptyMessage.SSZ_SCHEMA,
+                true,
+                forkDigestContextCodec,
+                new LightClientLatestUpdateMessageHandler<>(
+                    "light client optimistic update", store::getLatestOptimisticUpdate),
                 peerLookup));
   }
 

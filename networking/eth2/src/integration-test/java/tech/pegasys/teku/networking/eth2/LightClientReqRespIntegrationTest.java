@@ -20,7 +20,6 @@ import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.RESOU
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,8 +89,7 @@ public class LightClientReqRespIntegrationTest {
             UInt64.valueOf(9), UInt64.ONE, UInt64.valueOf(10));
     serverStore.addFinalityUpdate(update, Bytes32.ZERO, (slot, root) -> true);
 
-    assertThat(serverPeer.requestLightClientFinalityUpdate().get(10, TimeUnit.SECONDS))
-        .isEqualTo(update);
+    assertThat(waitFor(serverPeer.requestLightClientFinalityUpdate())).isEqualTo(update);
   }
 
   @Test
@@ -105,8 +103,7 @@ public class LightClientReqRespIntegrationTest {
         dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.valueOf(9), UInt64.valueOf(10));
     serverStore.addOptimisticUpdate(update, Bytes32.ZERO, (slot, root) -> true);
 
-    assertThat(serverPeer.requestLightClientOptimisticUpdate().get(10, TimeUnit.SECONDS))
-        .isEqualTo(update);
+    assertThat(waitFor(serverPeer.requestLightClientOptimisticUpdate())).isEqualTo(update);
   }
 
   @Test
@@ -122,10 +119,9 @@ public class LightClientReqRespIntegrationTest {
     serverStore.addUpdate(period1, Bytes32.ZERO, (slot, root) -> true);
 
     final List<LightClientUpdate> received = new ArrayList<>();
-    serverPeer
-        .requestLightClientUpdatesByRange(
-            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add))
-        .get(10, TimeUnit.SECONDS);
+    waitFor(
+        serverPeer.requestLightClientUpdatesByRange(
+            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add)));
 
     assertThat(received).containsExactly(period0, period1);
   }
@@ -133,10 +129,9 @@ public class LightClientReqRespIntegrationTest {
   @Test
   public void shouldReturnNoUpdatesByRangeWhenNoneKnown() throws Exception {
     final List<LightClientUpdate> received = new ArrayList<>();
-    serverPeer
-        .requestLightClientUpdatesByRange(
-            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add))
-        .get(10, TimeUnit.SECONDS);
+    waitFor(
+        serverPeer.requestLightClientUpdatesByRange(
+            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add)));
 
     assertThat(received).isEmpty();
   }
@@ -146,7 +141,7 @@ public class LightClientReqRespIntegrationTest {
     final SignedBlockAndState blockAndState = server.getChainUpdater().advanceChain(1);
 
     final LightClientBootstrap bootstrap =
-        serverPeer.requestLightClientBootstrap(blockAndState.getRoot()).get(10, TimeUnit.SECONDS);
+        waitFor(serverPeer.requestLightClientBootstrap(blockAndState.getRoot()));
 
     assertThat(bootstrap)
         .isEqualTo(
@@ -174,7 +169,7 @@ public class LightClientReqRespIntegrationTest {
   }
 
   private static void assertResourceUnavailable(final SafeFuture<?> future) {
-    final Throwable error = catchThrowable(() -> future.get(10, TimeUnit.SECONDS));
+    final Throwable error = catchThrowable(() -> waitFor(future));
     assertThat(error).hasCauseInstanceOf(RpcException.class);
     assertThat(((RpcException) error.getCause()).getResponseCode()).isEqualTo(RESOURCE_UNAVAILABLE);
   }

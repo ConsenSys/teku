@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.ssz.SszDataAssert.assertThatSszData;
 import static tech.pegasys.teku.spec.constants.NetworkConstants.MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -22,26 +23,29 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 class LightClientUpdatesByRangeRequestMessageTest {
 
+  private static final Bytes EXPECTED_SSZ =
+      Bytes.fromHexString("0x03000000000000000500000000000000");
+  private static final LightClientUpdatesByRangeRequestMessage MESSAGE =
+      new LightClientUpdatesByRangeRequestMessage(UInt64.valueOf(3), UInt64.valueOf(5));
+
   @Test
-  void shouldRoundTripSsz() {
-    final LightClientUpdatesByRangeRequestMessage message =
-        new LightClientUpdatesByRangeRequestMessage(UInt64.valueOf(3), UInt64.valueOf(5));
-
-    final Bytes ssz = message.sszSerialize();
-
-    assertThat(ssz.size()).isEqualTo(16);
-    assertThat(LightClientUpdatesByRangeRequestMessage.SSZ_SCHEMA.sszDeserialize(ssz))
-        .isEqualTo(message);
-    assertThat(message.getStartPeriod()).isEqualTo(UInt64.valueOf(3));
-    assertThat(message.getCount()).isEqualTo(UInt64.valueOf(5));
+  public void shouldSerializeToSsz() {
+    final Bytes result = MESSAGE.sszSerialize();
+    assertThat(result).isEqualTo(EXPECTED_SSZ);
   }
 
   @Test
-  void shouldCapMaximumResponseChunksAtMaxRequestLightClientUpdates() {
-    assertThat(
-            new LightClientUpdatesByRangeRequestMessage(UInt64.ZERO, UInt64.valueOf(5))
-                .getMaximumResponseChunks())
-        .isEqualTo(5);
+  public void shouldDeserializeFromSsz() {
+    final LightClientUpdatesByRangeRequestMessage result =
+        LightClientUpdatesByRangeRequestMessage.SSZ_SCHEMA.sszDeserialize(EXPECTED_SSZ);
+    assertThatSszData(result).isEqualByAllMeansTo(MESSAGE);
+    assertThat(result.getStartPeriod()).isEqualTo(UInt64.valueOf(3));
+    assertThat(result.getCount()).isEqualTo(UInt64.valueOf(5));
+  }
+
+  @Test
+  public void shouldCapMaximumResponseChunksAtMaxRequestLightClientUpdates() {
+    assertThat(MESSAGE.getMaximumResponseChunks()).isEqualTo(5);
     assertThat(
             new LightClientUpdatesByRangeRequestMessage(UInt64.ZERO, UInt64.MAX_VALUE)
                 .getMaximumResponseChunks())

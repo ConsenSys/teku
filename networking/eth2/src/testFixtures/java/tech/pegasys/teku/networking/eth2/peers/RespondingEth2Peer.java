@@ -424,12 +424,12 @@ public class RespondingEth2Peer implements Eth2Peer {
 
   @Override
   public SafeFuture<LightClientFinalityUpdate> requestLightClientFinalityUpdate() {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not supported"));
+    return SafeFuture.failedFuture(new UnsupportedOperationException());
   }
 
   @Override
   public SafeFuture<LightClientOptimisticUpdate> requestLightClientOptimisticUpdate() {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not supported"));
+    return SafeFuture.failedFuture(new UnsupportedOperationException());
   }
 
   @Override
@@ -437,12 +437,12 @@ public class RespondingEth2Peer implements Eth2Peer {
       final UInt64 startPeriod,
       final UInt64 count,
       final RpcResponseListener<LightClientUpdate> listener) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not supported"));
+    return SafeFuture.failedFuture(new UnsupportedOperationException());
   }
 
   @Override
   public SafeFuture<LightClientBootstrap> requestLightClientBootstrap(final Bytes32 blockRoot) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not supported"));
+    return SafeFuture.failedFuture(new UnsupportedOperationException());
   }
 
   @Override

@@ -14,21 +14,35 @@
 package tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.ssz.SszDataAssert.assertThatSszData;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 
 class LightClientBootstrapRequestMessageTest {
 
-  @Test
-  void shouldEncodeAsRawRoot() {
-    final Bytes32 root = Bytes32.random();
-    final LightClientBootstrapRequestMessage message = new LightClientBootstrapRequestMessage(root);
+  private static final Bytes EXPECTED_SSZ =
+      Bytes.fromHexString("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+  private static final LightClientBootstrapRequestMessage MESSAGE =
+      new LightClientBootstrapRequestMessage(Bytes32.wrap(EXPECTED_SSZ));
 
-    assertThat(message.sszSerialize()).isEqualTo(root);
-    assertThat(LightClientBootstrapRequestMessage.SSZ_SCHEMA.sszDeserialize(root))
-        .isEqualTo(message);
-    assertThat(message.getBlockRoot()).isEqualTo(root);
-    assertThat(message.getMaximumResponseChunks()).isEqualTo(1);
+  @Test
+  public void shouldSerializeToSsz() {
+    final Bytes result = MESSAGE.sszSerialize();
+    assertThat(result).isEqualTo(EXPECTED_SSZ);
+  }
+
+  @Test
+  public void shouldDeserializeFromSsz() {
+    final LightClientBootstrapRequestMessage result =
+        LightClientBootstrapRequestMessage.SSZ_SCHEMA.sszDeserialize(EXPECTED_SSZ);
+    assertThatSszData(result).isEqualByAllMeansTo(MESSAGE);
+    assertThat(result.getBlockRoot()).isEqualTo(Bytes32.wrap(EXPECTED_SSZ));
+  }
+
+  @Test
+  public void shouldRequestSingleResponseChunk() {
+    assertThat(MESSAGE.getMaximumResponseChunks()).isEqualTo(1);
   }
 }
