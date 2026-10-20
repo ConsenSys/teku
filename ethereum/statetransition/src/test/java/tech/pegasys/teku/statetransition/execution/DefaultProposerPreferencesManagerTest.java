@@ -26,6 +26,9 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -87,6 +90,8 @@ public class DefaultProposerPreferencesManagerTest {
     assertThat(result).isEqualTo(ACCEPT);
     assertThat(manager.getProposerPreferences(slot, dependentRoot))
         .hasValue(signedProposerPreferences.getMessage());
+    assertThat(manager.getSignedProposerPreferences(Optional.of(slot), Optional.of(dependentRoot)))
+        .containsExactly(signedProposerPreferences);
   }
 
   @TestTemplate
@@ -123,6 +128,60 @@ public class DefaultProposerPreferencesManagerTest {
         .isInstanceOf(UnsupportedOperationException.class);
     assertThat(manager.getProposerPreferencesForSlot(proposalSlot))
         .containsExactly(preferences.getMessage());
+  }
+
+  @TestTemplate
+  void shouldReturnSignedPreferencesFilteredBySlotAndDependentRoot() {
+    final UInt64 firstSlot = UInt64.valueOf(10);
+    final UInt64 secondSlot = UInt64.valueOf(11);
+    final Bytes32 firstDependentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 secondDependentRoot = dataStructureUtil.randomBytes32();
+    final SignedProposerPreferences firstSlotFirstRoot =
+        createSignedProposerPreferences(firstSlot, firstDependentRoot);
+    final SignedProposerPreferences firstSlotSecondRoot =
+        createSignedProposerPreferences(firstSlot, secondDependentRoot);
+    final SignedProposerPreferences secondSlotFirstRoot =
+        createSignedProposerPreferences(secondSlot, firstDependentRoot);
+    when(gossipValidator.validate(any())).thenReturn(SafeFuture.completedFuture(ACCEPT));
+    safeJoin(manager.addRemote(firstSlotFirstRoot));
+    safeJoin(manager.addRemote(firstSlotSecondRoot));
+    safeJoin(manager.addRemote(secondSlotFirstRoot));
+
+    assertThat(manager.getSignedProposerPreferences(Optional.empty(), Optional.empty()))
+        .containsExactlyInAnyOrder(firstSlotFirstRoot, firstSlotSecondRoot, secondSlotFirstRoot);
+    assertThat(manager.getSignedProposerPreferences(Optional.of(firstSlot), Optional.empty()))
+        .containsExactlyInAnyOrder(firstSlotFirstRoot, firstSlotSecondRoot);
+    assertThat(
+            manager.getSignedProposerPreferences(Optional.empty(), Optional.of(firstDependentRoot)))
+        .containsExactly(firstSlotFirstRoot, secondSlotFirstRoot);
+    assertThat(
+            manager.getSignedProposerPreferences(
+                Optional.of(firstSlot), Optional.of(secondDependentRoot)))
+        .containsExactly(firstSlotSecondRoot);
+    assertThat(
+            manager.getSignedProposerPreferences(
+                Optional.of(secondSlot), Optional.of(secondDependentRoot)))
+        .isEmpty();
+    assertThat(
+            manager.getSignedProposerPreferences(Optional.of(UInt64.valueOf(12)), Optional.empty()))
+        .isEmpty();
+  }
+
+  @TestTemplate
+  void shouldReturnSignedPreferencesOrderedByProposalSlot() {
+    when(gossipValidator.validate(any())).thenReturn(SafeFuture.completedFuture(ACCEPT));
+    final List<SignedProposerPreferences> preferences = new ArrayList<>();
+    for (int slot = 12; slot >= 9; slot--) {
+      final SignedProposerPreferences signedProposerPreferences =
+          createSignedProposerPreferences(UInt64.valueOf(slot), dataStructureUtil.randomBytes32());
+      safeJoin(manager.addRemote(signedProposerPreferences));
+      preferences.addFirst(signedProposerPreferences);
+    }
+
+    manager.onSlot(UInt64.valueOf(10));
+
+    assertThat(manager.getSignedProposerPreferences(Optional.empty(), Optional.empty()))
+        .containsExactlyElementsOf(preferences.subList(1, preferences.size()));
   }
 
   @TestTemplate

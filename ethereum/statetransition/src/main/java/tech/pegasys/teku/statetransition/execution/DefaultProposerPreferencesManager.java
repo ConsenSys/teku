@@ -20,6 +20,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -43,7 +44,7 @@ public class DefaultProposerPreferencesManager
 
   private final ProposerPreferencesGossipValidator proposerPreferencesGossipValidator;
   private final PendingPool<PendingProposerPreferences> pendingProposerPreferences;
-  private final ConcurrentNavigableMap<UInt64, Map<Bytes32, ProposerPreferences>>
+  private final ConcurrentNavigableMap<UInt64, Map<Bytes32, SignedProposerPreferences>>
       acceptedProposerPreferences = new ConcurrentSkipListMap<>();
   private final Subscribers<OperationAddedSubscriber<SignedProposerPreferences>> subscribers =
       Subscribers.create(true);
@@ -71,14 +72,31 @@ public class DefaultProposerPreferencesManager
   public Optional<ProposerPreferences> getProposerPreferences(
       final UInt64 slot, final Bytes32 dependentRoot) {
     return Optional.ofNullable(acceptedProposerPreferences.get(slot))
-        .map(preferencesByDependentRoot -> preferencesByDependentRoot.get(dependentRoot));
+        .map(preferencesByDependentRoot -> preferencesByDependentRoot.get(dependentRoot))
+        .map(SignedProposerPreferences::getMessage);
   }
 
   @Override
   public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
-    return Optional.ofNullable(acceptedProposerPreferences.get(slot))
-        .map(preferencesByDependentRoot -> List.copyOf(preferencesByDependentRoot.values()))
-        .orElse(List.of());
+    return getSignedProposerPreferences(Optional.of(slot), Optional.empty()).stream()
+        .map(SignedProposerPreferences::getMessage)
+        .toList();
+  }
+
+  @Override
+  public List<SignedProposerPreferences> getSignedProposerPreferences(
+      final Optional<UInt64> maybeSlot, final Optional<Bytes32> maybeDependentRoot) {
+    final Stream<Map<Bytes32, SignedProposerPreferences>> preferencesBySlot =
+        maybeSlot
+            .map(slot -> Stream.ofNullable(acceptedProposerPreferences.get(slot)))
+            .orElseGet(() -> acceptedProposerPreferences.values().stream());
+    return preferencesBySlot
+        .flatMap(
+            preferencesByDependentRoot ->
+                maybeDependentRoot
+                    .map(root -> Stream.ofNullable(preferencesByDependentRoot.get(root)))
+                    .orElseGet(() -> preferencesByDependentRoot.values().stream()))
+        .toList();
   }
 
   @Override
@@ -132,7 +150,7 @@ public class DefaultProposerPreferencesManager
         final ProposerPreferences proposerPreferences = signedProposerPreferences.getMessage();
         acceptedProposerPreferences
             .computeIfAbsent(proposerPreferences.getProposalSlot(), __ -> new ConcurrentHashMap<>())
-            .put(proposerPreferences.getDependentRoot(), proposerPreferences);
+            .put(proposerPreferences.getDependentRoot(), signedProposerPreferences);
         subscribers.forEach(
             subscriber ->
                 subscriber.onOperationAdded(signedProposerPreferences, result, fromNetwork));

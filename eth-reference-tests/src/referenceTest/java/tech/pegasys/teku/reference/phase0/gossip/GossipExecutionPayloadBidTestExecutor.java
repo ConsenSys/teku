@@ -279,6 +279,12 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
           }
 
           @Override
+          public List<SignedProposerPreferences> getSignedProposerPreferences(
+              final Optional<UInt64> maybeSlot, final Optional<Bytes32> maybeDependentRoot) {
+            return List.of();
+          }
+
+          @Override
           public void subscribeOperationAdded(
               final OperationAddedSubscriber<SignedProposerPreferences> subscriber) {}
         };

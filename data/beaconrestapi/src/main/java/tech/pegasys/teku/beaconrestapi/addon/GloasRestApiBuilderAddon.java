@@ -16,6 +16,7 @@ package tech.pegasys.teku.beaconrestapi.addon;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.beaconrestapi.RestApiBuilderAddon;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetPayloadAttestations;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetProposerPreferences;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetSignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.PostExecutionPayloadEnvelope;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.PostPayloadAttestations;
@@ -62,6 +63,7 @@ public class GloasRestApiBuilderAddon implements RestApiBuilderAddon {
         .endpoint(new GetPayloadAttestationData(dataProvider, schemaCache))
         .endpoint(new PostPublishExecutionPayloadBid(dataProvider, schemaCache))
         .endpoint(new PostProposerPreferences(dataProvider, spec, schemaCache))
+        .endpoint(new GetProposerPreferences(dataProvider, schemaCache))
         .endpoint(new PostBuilderPreferences(dataProvider))
         .endpoint(new PostStateBuilders(dataProvider));
   }
