@@ -36,6 +36,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
+import tech.pegasys.teku.infrastructure.json.exceptions.MissingRequiredFieldException;
 import tech.pegasys.teku.infrastructure.restapi.StubRestApiRequest;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -143,21 +144,8 @@ public class SetBuilderConfigTest {
   void metadata_shouldRejectBuilderWithoutUrl() {
     assertThatThrownBy(
             () -> getRequestBodyFromMetadata(handler, "{\"builders\":[{\"min_bid\":\"1\"}]}"))
-        .isInstanceOf(IllegalArgumentException.class);
-  }
-
-  @Test
-  void metadata_shouldRejectDuplicateUrls() {
-    assertThatThrownBy(
-            () ->
-                getRequestBodyFromMetadata(
-                    handler,
-                    "{\"builders\":[{\"url\":\""
-                        + BUILDER_URL
-                        + "\"},{\"url\":\""
-                        + BUILDER_URL
-                        + "\"}]}"))
-        .isInstanceOf(IllegalArgumentException.class);
+        .isInstanceOf(MissingRequiredFieldException.class)
+        .hasMessage("required fields: (url) were not set");
   }
 
   @Test

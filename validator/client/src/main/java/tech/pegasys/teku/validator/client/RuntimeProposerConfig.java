@@ -31,6 +31,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
+import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.CoreTypes;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
@@ -231,7 +232,7 @@ public class RuntimeProposerConfig {
                                             builderEntry.builderBoostFactor().orElse(null),
                                             builderEntry.maxExecutionPayment().orElse(null)),
                                     (__, ___) -> {
-                                      throw new IllegalArgumentException(
+                                      throw new InvalidConfigurationException(
                                           "builders contain duplicate url");
                                     },
                                     LinkedHashMap::new)));

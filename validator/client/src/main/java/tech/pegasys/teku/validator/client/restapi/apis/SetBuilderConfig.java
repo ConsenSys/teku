@@ -23,6 +23,7 @@ import static tech.pegasys.teku.validator.client.restapi.ValidatorTypes.PARAM_PU
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.Optional;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
@@ -75,7 +76,7 @@ public class SetBuilderConfig extends RestApiEndpoint {
 
     try {
       manager.setBuilderConfig(publicKey, body);
-    } catch (final SetBuilderConfigException e) {
+    } catch (final SetBuilderConfigException | InvalidConfigurationException e) {
       request.respondError(SC_BAD_REQUEST, e.getMessage());
       return;
     }
