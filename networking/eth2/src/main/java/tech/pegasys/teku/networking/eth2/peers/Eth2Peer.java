@@ -36,9 +36,6 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnsByRootIdentifier;
@@ -135,15 +132,6 @@ public interface Eth2Peer extends Peer, SyncSource {
   SafeFuture<Optional<BlobSidecar>> requestBlobSidecarByRoot(BlobIdentifier blobIdentifier);
 
   SafeFuture<MetadataMessage> requestMetadata();
-
-  SafeFuture<LightClientFinalityUpdate> requestLightClientFinalityUpdate();
-
-  SafeFuture<LightClientOptimisticUpdate> requestLightClientOptimisticUpdate();
-
-  SafeFuture<Void> requestLightClientUpdatesByRange(
-      UInt64 startPeriod, UInt64 count, RpcResponseListener<LightClientUpdate> listener);
-
-  SafeFuture<LightClientBootstrap> requestLightClientBootstrap(Bytes32 blockRoot);
 
   default <I extends RpcRequest, O extends SszData> SafeFuture<O> requestSingleItem(
       final Eth2RpcMethod<I, O> method, final I request) {

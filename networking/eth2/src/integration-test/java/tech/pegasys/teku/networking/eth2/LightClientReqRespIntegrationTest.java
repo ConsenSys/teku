@@ -31,6 +31,8 @@ import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
+import tech.pegasys.teku.networking.eth2.rpc.beaconchain.BeaconChainMethods;
+import tech.pegasys.teku.networking.eth2.rpc.core.Eth2RpcResponseHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.p2p.rpc.RpcResponseListener;
 import tech.pegasys.teku.spec.Spec;
@@ -41,6 +43,9 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.EmptyMessage;
+import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientBootstrapRequestMessage;
+import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientUpdatesByRangeRequestMessage;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 
@@ -54,6 +59,7 @@ public class LightClientReqRespIntegrationTest {
 
   private NodeManager server;
   private Eth2Peer serverPeer;
+  private BeaconChainMethods methods;
 
   @BeforeEach
   public void setUp() throws Exception {
@@ -75,6 +81,7 @@ public class LightClientReqRespIntegrationTest {
     waitFor(client.connect(server));
     waitFor(() -> assertThat(client.network().getPeerCount()).isEqualTo(1));
     serverPeer = client.network().getPeer(server.network().getNodeId()).orElseThrow();
+    methods = ((ActiveEth2P2PNetwork) client.network()).getBeaconChainMethods();
   }
 
   @AfterEach
@@ -89,12 +96,12 @@ public class LightClientReqRespIntegrationTest {
             UInt64.valueOf(9), UInt64.ONE, UInt64.valueOf(10));
     serverStore.addFinalityUpdate(update, Bytes32.ZERO, (slot, root) -> true);
 
-    assertThat(waitFor(serverPeer.requestLightClientFinalityUpdate())).isEqualTo(update);
+    assertThat(waitFor(requestFinalityUpdate())).isEqualTo(update);
   }
 
   @Test
   public void shouldReturnResourceUnavailableWhenNoFinalityUpdate() {
-    assertResourceUnavailable(serverPeer.requestLightClientFinalityUpdate());
+    assertResourceUnavailable(requestFinalityUpdate());
   }
 
   @Test
@@ -103,12 +110,12 @@ public class LightClientReqRespIntegrationTest {
         dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.valueOf(9), UInt64.valueOf(10));
     serverStore.addOptimisticUpdate(update, Bytes32.ZERO, (slot, root) -> true);
 
-    assertThat(waitFor(serverPeer.requestLightClientOptimisticUpdate())).isEqualTo(update);
+    assertThat(waitFor(requestOptimisticUpdate())).isEqualTo(update);
   }
 
   @Test
   public void shouldReturnResourceUnavailableWhenNoOptimisticUpdate() {
-    assertResourceUnavailable(serverPeer.requestLightClientOptimisticUpdate());
+    assertResourceUnavailable(requestOptimisticUpdate());
   }
 
   @Test
@@ -118,22 +125,13 @@ public class LightClientReqRespIntegrationTest {
     serverStore.addUpdate(period0, Bytes32.ZERO, (slot, root) -> true);
     serverStore.addUpdate(period1, Bytes32.ZERO, (slot, root) -> true);
 
-    final List<LightClientUpdate> received = new ArrayList<>();
-    waitFor(
-        serverPeer.requestLightClientUpdatesByRange(
-            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add)));
-
-    assertThat(received).containsExactly(period0, period1);
+    assertThat(requestUpdatesByRange(UInt64.ZERO, UInt64.valueOf(5)))
+        .containsExactly(period0, period1);
   }
 
   @Test
   public void shouldReturnNoUpdatesByRangeWhenNoneKnown() throws Exception {
-    final List<LightClientUpdate> received = new ArrayList<>();
-    waitFor(
-        serverPeer.requestLightClientUpdatesByRange(
-            UInt64.ZERO, UInt64.valueOf(5), RpcResponseListener.from(received::add)));
-
-    assertThat(received).isEmpty();
+    assertThat(requestUpdatesByRange(UInt64.ZERO, UInt64.valueOf(5))).isEmpty();
   }
 
   @Test
@@ -147,8 +145,7 @@ public class LightClientReqRespIntegrationTest {
                 .advanceChain(spec.computeStartSlotAtEpoch(UInt64.ONE).plus(1)));
     final SignedBlockAndState blockAndState = server.getChainUpdater().finalizeEpoch(1);
 
-    final LightClientBootstrap bootstrap =
-        waitFor(serverPeer.requestLightClientBootstrap(blockAndState.getRoot()));
+    final LightClientBootstrap bootstrap = waitFor(requestBootstrap(blockAndState.getRoot()));
 
     assertThat(bootstrap)
         .isEqualTo(
@@ -158,7 +155,45 @@ public class LightClientReqRespIntegrationTest {
 
   @Test
   public void shouldReturnResourceUnavailableForUnknownBootstrapBlock() {
-    assertResourceUnavailable(serverPeer.requestLightClientBootstrap(Bytes32.random()));
+    assertResourceUnavailable(requestBootstrap(Bytes32.random()));
+  }
+
+  private SafeFuture<LightClientFinalityUpdate> requestFinalityUpdate() {
+    return serverPeer.requestSingleItem(
+        methods.lightClientFinalityUpdate().orElseThrow(), EmptyMessage.EMPTY_MESSAGE);
+  }
+
+  private SafeFuture<LightClientOptimisticUpdate> requestOptimisticUpdate() {
+    return serverPeer.requestSingleItem(
+        methods.lightClientOptimisticUpdate().orElseThrow(), EmptyMessage.EMPTY_MESSAGE);
+  }
+
+  private SafeFuture<LightClientBootstrap> requestBootstrap(final Bytes32 blockRoot) {
+    return serverPeer.requestSingleItem(
+        methods.lightClientBootstrap().orElseThrow(),
+        new LightClientBootstrapRequestMessage(blockRoot));
+  }
+
+  private List<LightClientUpdate> requestUpdatesByRange(
+      final UInt64 startPeriod, final UInt64 count) throws Exception {
+    final List<LightClientUpdate> received = new ArrayList<>();
+    final Eth2RpcResponseHandler<LightClientUpdate, Void> responseHandler =
+        Eth2RpcResponseHandler.expectMultipleResponses(RpcResponseListener.from(received::add));
+    waitFor(
+        serverPeer
+            .sendRequest(
+                methods.lightClientUpdatesByRange().orElseThrow(),
+                new LightClientUpdatesByRangeRequestMessage(startPeriod, count),
+                responseHandler)
+            .thenCompose(
+                controller -> {
+                  controller
+                      .getRequiredOutgoingRequestHandler()
+                      .handleInitialPayloadSent(controller.getRpcStream());
+                  return controller.getRequiredOutgoingRequestHandler().getCompletedFuture();
+                })
+            .thenCompose(__ -> responseHandler.getResult()));
+    return received;
   }
 
   private LightClientUpdate updateInPeriod(final int period) {

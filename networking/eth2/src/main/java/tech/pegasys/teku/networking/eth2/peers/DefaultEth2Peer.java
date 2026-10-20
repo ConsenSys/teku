@@ -65,10 +65,6 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BeaconBlocksByRangeRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BeaconBlocksByRootRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
@@ -84,8 +80,6 @@ import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayl
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayloadEnvelopesByRootRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayloadEnvelopesByRootRequestMessage.ExecutionPayloadEnvelopesByRootRequestMessageSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.GoodbyeMessage;
-import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientBootstrapRequestMessage;
-import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.LightClientUpdatesByRangeRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.PingMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.RpcRequest;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.bodyselector.RpcRequestBodySelector;
@@ -608,46 +602,6 @@ class DefaultEth2Peer extends DelegatingPeer implements Eth2Peer {
   @Override
   public SafeFuture<MetadataMessage> requestMetadata() {
     return requestSingleItem(rpcMethods.getMetadata(), EmptyMessage.EMPTY_MESSAGE);
-  }
-
-  @Override
-  public SafeFuture<LightClientFinalityUpdate> requestLightClientFinalityUpdate() {
-    return rpcMethods
-        .lightClientFinalityUpdate()
-        .map(method -> requestSingleItem(method, EmptyMessage.EMPTY_MESSAGE))
-        .orElse(failWithUnsupportedMethodException("LightClientFinalityUpdate"));
-  }
-
-  @Override
-  public SafeFuture<LightClientOptimisticUpdate> requestLightClientOptimisticUpdate() {
-    return rpcMethods
-        .lightClientOptimisticUpdate()
-        .map(method -> requestSingleItem(method, EmptyMessage.EMPTY_MESSAGE))
-        .orElse(failWithUnsupportedMethodException("LightClientOptimisticUpdate"));
-  }
-
-  @Override
-  public SafeFuture<Void> requestLightClientUpdatesByRange(
-      final UInt64 startPeriod,
-      final UInt64 count,
-      final RpcResponseListener<LightClientUpdate> listener) {
-    return rpcMethods
-        .lightClientUpdatesByRange()
-        .map(
-            method ->
-                requestStream(
-                    method,
-                    new LightClientUpdatesByRangeRequestMessage(startPeriod, count),
-                    listener))
-        .orElse(failWithUnsupportedMethodException("LightClientUpdatesByRange"));
-  }
-
-  @Override
-  public SafeFuture<LightClientBootstrap> requestLightClientBootstrap(final Bytes32 blockRoot) {
-    return rpcMethods
-        .lightClientBootstrap()
-        .map(method -> requestSingleItem(method, new LightClientBootstrapRequestMessage(blockRoot)))
-        .orElse(failWithUnsupportedMethodException("LightClientBootstrap"));
   }
 
   @Override
