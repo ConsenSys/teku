@@ -218,7 +218,7 @@ public class ProposerConfigManagerTest {
                     .builderBoostFactor())
             .isEqualTo(randomBoostFactor);
       }
-      case BUILDER_URLS -> {
+      case BUILDERS -> {
         final BuilderEntry builder = randomBuilderEntry();
         prepareConfigWithValidatorSpecificProperty(property, List.of(builder), true);
         assertThat(
@@ -299,7 +299,7 @@ public class ProposerConfigManagerTest {
                     .builderBoostFactor())
             .isEqualTo(randomBoostFactor);
       }
-      case BUILDER_URLS -> {
+      case BUILDERS -> {
         final BuilderEntry builder = randomBuilderEntry();
         prepareConfigWithDefaultConfigProperty(property, List.of(builder));
         assertThat(
@@ -932,7 +932,7 @@ public class ProposerConfigManagerTest {
               isDefault ? defaultFeeRecipientConfig : null,
               new ProposerConfig.BuilderConfig(
                   isDefault ? true : null, null, null, null, (UInt64) value, null));
-      case BUILDER_URLS -> {
+      case BUILDERS -> {
         @SuppressWarnings("unchecked")
         final List<BuilderEntry> builders = (List<BuilderEntry>) value;
         yield new ProposerConfig.Config(
@@ -1016,6 +1016,6 @@ public class ProposerConfigManagerTest {
     BUILDER_REGISTRATION_OVERRIDE_TIMESTAMP,
     BUILDER_MIN_BID,
     BUILDER_BOOST_FACTOR,
-    BUILDER_URLS
+    BUILDERS
   }
 }
