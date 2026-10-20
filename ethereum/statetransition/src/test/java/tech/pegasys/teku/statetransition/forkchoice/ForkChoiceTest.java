@@ -100,6 +100,7 @@ import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
 import tech.pegasys.teku.spec.executionlayer.ExecutionPayloadStatus;
@@ -1912,6 +1913,54 @@ class ForkChoiceTest {
         .isEqualTo(envelope.getMessage().getPayload().getBlockHash());
     assertThat(strategy.getParentBeaconBlockNode(ForkChoiceNode.createBase(child.getRoot())))
         .contains(ForkChoiceNode.createFull(anchor.getRoot()));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void onBlock_gloasGenesisChildShouldBuildOnGenesisFullPayload(
+      final boolean genesisPayloadApplied) {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    if (genesisPayloadApplied) {
+      // GenesisHandler and BeaconChainController apply the synthetic genesis envelope before any
+      // block can be imported on a Gloas genesis network
+      assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+    }
+    final BeaconStateGloas genesisState = BeaconStateGloas.required(genesis.getState());
+    final SignedBlockAndState child = chainBuilder.generateBlockAtSlot(ONE);
+    // The genesis bid carries the genesis execution block hash, so the first block builds on the
+    // genesis FULL payload rather than on EMPTY
+    assertThat(
+            child
+                .getBlock()
+                .getMessage()
+                .getBody()
+                .getOptionalSignedExecutionPayloadBid()
+                .orElseThrow()
+                .getMessage()
+                .getParentBlockHash())
+        .isEqualTo(genesisState.getLatestExecutionPayloadBid().getBlockHash())
+        .isEqualTo(genesisState.getLatestBlockHash());
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(child.getSlot());
+
+    final SafeFuture<BlockImportResult> result =
+        forkChoice.onBlock(
+            child.getBlock(), Optional.empty(), BlockBroadcastValidator.NOOP, executionLayer);
+
+    if (!genesisPayloadApplied) {
+      assertThat(result)
+          .isCompletedWithValue(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+      assertThat(recentChainData.getStore().containsBlock(child.getRoot())).isFalse();
+      return;
+    }
+    assertThat(result).isCompletedWithValueMatching(BlockImportResult::isSuccessful);
+    final ReadOnlyForkChoiceStrategy strategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(strategy.getParentBeaconBlockNode(ForkChoiceNode.createBase(child.getRoot())))
+        .contains(ForkChoiceNode.createFull(genesis.getRoot()));
+    assertThat(strategy.getBlockData(child.getRoot()).orElseThrow().getExecutionBlockHash())
+        .isEqualTo(genesisState.getLatestBlockHash());
   }
 
   @Test
