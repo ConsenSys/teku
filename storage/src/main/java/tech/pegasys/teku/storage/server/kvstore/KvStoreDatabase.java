@@ -18,8 +18,10 @@ import static java.util.stream.Collectors.groupingBy;
 import static tech.pegasys.teku.infrastructure.logging.DbLogger.DB_LOGGER;
 import static tech.pegasys.teku.infrastructure.logging.StatusLogger.STATUS_LOG;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
+import static tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas.isParentBlockFull;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Suppliers;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1694,11 +1696,21 @@ public class KvStoreDatabase implements Database {
             update.getOptimisticTransitionBlockRoot());
 
     if (update.isExecutionPayloadEnvelopesEnabled()) {
-      final Set<Bytes32> nonCanonicalPrunedRoots =
-          update.getDeletedHotBlocks().keySet().stream()
-              .filter(root -> !update.getFinalizedChildToParentMap().containsKey(root))
+      // Envelopes are dropped for pruned non-canonical blocks and for finalized blocks whose
+      // payload the finalized chain did not build on
+      final Set<Bytes32> prunedExecutionPayloadRoots =
+          Stream.concat(
+                  update.getDeletedHotBlocks().keySet().stream()
+                      .filter(root -> !update.getFinalizedChildToParentMap().containsKey(root)),
+                  findOrphanedExecutionPayloadRoots(
+                      update.getFinalizedCheckpoint(),
+                      update.getFinalizedChildToParentMap(),
+                      update.getFinalizedBlocks(),
+                      update.getDeletedHotBlocks())
+                      .stream())
               .collect(Collectors.toSet());
-      updateBlindedExecutionPayloads(update.getBlindedExecutionPayloads(), nonCanonicalPrunedRoots);
+      updateBlindedExecutionPayloads(
+          update.getBlindedExecutionPayloads(), prunedExecutionPayloadRoots);
     }
 
     if (update.isBlobSidecarsEnabled()) {
@@ -2034,6 +2046,75 @@ public class KvStoreDatabase implements Database {
     }
 
     return Optional.empty();
+  }
+
+  /**
+   * Finds the finalized blocks whose execution payload is not part of the finalized chain: their
+   * finalized child built on their EMPTY variant, so their blinded envelope must not be retained.
+   * Block bodies are read from the database, as the store's block cache does not hold blocks that
+   * are finalized long after import. The newly finalized block has no finalized child yet, so it is
+   * resolved by the finalization that finalizes its child, when it is the parent already in the
+   * finalized database. The pair of the previously finalized block and its own parent is part of
+   * every finalization update, so it is re-evaluated each time, which is harmless.
+   *
+   * @param deletedHotBlocks the slots of the hot blocks pruned by this update, used to skip
+   *     pre-Gloas parents without reading them
+   */
+  @VisibleForTesting
+  Set<Bytes32> findOrphanedExecutionPayloadRoots(
+      final Optional<Checkpoint> finalizedCheckpoint,
+      final Map<Bytes32, Bytes32> finalizedChildToParentMap,
+      final Map<Bytes32, SignedBeaconBlock> finalizedBlocks,
+      final Map<Bytes32, UInt64> deletedHotBlocks) {
+    // Nothing finalized before the Gloas fork can have an envelope. This matters on networks
+    // where Gloas is scheduled but not yet active, where reading the finalized blocks on every
+    // finalization would be wasted work.
+    if (finalizedCheckpoint.isEmpty()
+        || !spec.isExecutionPayloadEnvelopeAvailableAtSlot(
+            finalizedCheckpoint.get().getEpochStartSlot(spec))) {
+      return Set.of();
+    }
+    final Function<Bytes32, Optional<SignedBeaconBlock>> getBlock =
+        root ->
+            Optional.ofNullable(finalizedBlocks.get(root))
+                .or(() -> dao.getHotBlock(root))
+                // The parent of the oldest finalized child is only in finalized storage. This is
+                // the dao's finalized lookup, not the getFinalizedBlock(root) helper of this
+                // class, which reads the hot column.
+                .or(() -> dao.getFinalizedBlock(root));
+    final Set<Bytes32> orphanedExecutionPayloadRoots = new HashSet<>();
+    // Walk the finalized chain from the newly finalized block back to the previously finalized
+    // block one pair at a time, so each block is read once and only two are held at a time
+    // however many blocks a finalization covers
+    final Bytes32 newlyFinalizedRoot = finalizedCheckpoint.get().getRoot();
+    Bytes32 childRoot = newlyFinalizedRoot;
+    // The child is only read once there is a Gloas parent to compare it with
+    Supplier<Optional<SignedBeaconBlock>> child =
+        Suppliers.memoize(() -> getBlock.apply(newlyFinalizedRoot));
+    while (finalizedChildToParentMap.containsKey(childRoot)) {
+      final Bytes32 parentRoot = finalizedChildToParentMap.get(childRoot);
+      // Finalized parents are pruned hot blocks, so their slot is usually known without reading
+      // the block, which stops the walk cheaply at the Gloas fork boundary
+      final UInt64 knownParentSlot = deletedHotBlocks.get(parentRoot);
+      if (knownParentSlot != null
+          && !spec.isExecutionPayloadEnvelopeAvailableAtSlot(knownParentSlot)) {
+        break;
+      }
+      final Optional<SignedBeaconBlock> parent = getBlock.apply(parentRoot);
+      if (parent.isEmpty()
+          || !spec.isExecutionPayloadEnvelopeAvailableAtSlot(parent.get().getSlot())) {
+        break;
+      }
+      if (child
+          .get()
+          .filter(childBlock -> !isParentBlockFull(parent.get(), childBlock))
+          .isPresent()) {
+        orphanedExecutionPayloadRoots.add(parentRoot);
+      }
+      childRoot = parentRoot;
+      child = () -> parent;
+    }
+    return orphanedExecutionPayloadRoots;
   }
 
   private void updateBlindedExecutionPayloads(
