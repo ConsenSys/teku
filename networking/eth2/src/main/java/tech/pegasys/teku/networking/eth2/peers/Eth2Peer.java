@@ -63,6 +63,7 @@ public interface Eth2Peer extends Peer, SyncSource {
       final RateTracker blobSidecarsRequestTracker,
       final RateTracker dataColumnSidecarsRequestTracker,
       final RateTracker executionPayloadEnvelopesRequestTracker,
+      final RateTracker lightClientUpdatesRequestTracker,
       final RateTracker requestTracker,
       final MetricsSystem metricsSystem,
       final TimeProvider timeProvider,
@@ -80,6 +81,7 @@ public interface Eth2Peer extends Peer, SyncSource {
         blobSidecarsRequestTracker,
         dataColumnSidecarsRequestTracker,
         executionPayloadEnvelopesRequestTracker,
+        lightClientUpdatesRequestTracker,
         requestTracker,
         metricsSystem,
         timeProvider,
@@ -201,6 +203,18 @@ public interface Eth2Peer extends Peer, SyncSource {
         RequestObject.EXECUTION_PAYLOAD_ENVELOPE,
         requestKey,
         returnedExecutionPayloadEnvelopesCount);
+  }
+
+  default Optional<RequestKey> approveLightClientUpdatesRequest(
+      final ResponseCallback<LightClientUpdate> callback, final long lightClientUpdatesCount) {
+    return approveObjectsRequest(
+        RequestObject.LIGHT_CLIENT_UPDATE, callback, lightClientUpdatesCount);
+  }
+
+  default void adjustLightClientUpdatesRequest(
+      final RequestKey requestKey, final long returnedLightClientUpdatesCount) {
+    adjustObjectsRequest(
+        RequestObject.LIGHT_CLIENT_UPDATE, requestKey, returnedLightClientUpdatesCount);
   }
 
   long getAvailableDataColumnSidecarsRequestCount();

@@ -15,20 +15,24 @@ package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.spec.constants.NetworkConstants.MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
+import tech.pegasys.teku.networking.eth2.peers.RequestKey;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -47,6 +51,7 @@ class LightClientUpdatesByRangeMessageHandlerTest {
       new LightClientUpdatesByRangeMessageHandler(store);
 
   private final Eth2Peer peer = mock(Eth2Peer.class);
+  private final RequestKey requestKey = new RequestKey(UInt64.ZERO, 0);
 
   @SuppressWarnings("unchecked")
   private final ResponseCallback<LightClientUpdate> callback = mock(ResponseCallback.class);
@@ -54,6 +59,8 @@ class LightClientUpdatesByRangeMessageHandlerTest {
   @BeforeEach
   void setUp() {
     when(peer.approveRequest()).thenReturn(true);
+    when(peer.approveLightClientUpdatesRequest(any(), anyLong()))
+        .thenReturn(Optional.of(requestKey));
     when(callback.respond(any())).thenReturn(SafeFuture.COMPLETE);
   }
 
@@ -70,6 +77,8 @@ class LightClientUpdatesByRangeMessageHandlerTest {
     inOrder.verify(callback).respond(update1);
     inOrder.verify(callback).respond(update2);
     inOrder.verify(callback).completeSuccessfully();
+    verify(peer).approveLightClientUpdatesRequest(callback, 2);
+    verify(peer, never()).adjustLightClientUpdatesRequest(any(), anyLong());
   }
 
   @Test
@@ -80,6 +89,8 @@ class LightClientUpdatesByRangeMessageHandlerTest {
         PROTOCOL_ID, peer, request(UInt64.ZERO, UInt64.valueOf(1000)), callback);
 
     verify(store).getBestUpdatesInRange(UInt64.ZERO, MAX_REQUEST_LIGHT_CLIENT_UPDATES);
+    verify(peer).approveLightClientUpdatesRequest(callback, MAX_REQUEST_LIGHT_CLIENT_UPDATES);
+    verify(peer).adjustLightClientUpdatesRequest(requestKey, 0);
     verify(callback).completeSuccessfully();
   }
 
@@ -102,6 +113,15 @@ class LightClientUpdatesByRangeMessageHandlerTest {
   @Test
   void shouldIgnoreRateLimitedRequest() {
     when(peer.approveRequest()).thenReturn(false);
+
+    handler.onIncomingMessage(PROTOCOL_ID, peer, request(UInt64.ZERO, UInt64.ONE), callback);
+
+    verifyNoInteractions(store, callback);
+  }
+
+  @Test
+  void shouldIgnoreRequestWhenObjectsRateLimited() {
+    when(peer.approveLightClientUpdatesRequest(any(), anyLong())).thenReturn(Optional.empty());
 
     handler.onIncomingMessage(PROTOCOL_ID, peer, request(UInt64.ZERO, UInt64.ONE), callback);
 

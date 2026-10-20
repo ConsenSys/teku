@@ -14,9 +14,11 @@
 package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
 import java.util.List;
+import java.util.Optional;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
+import tech.pegasys.teku.networking.eth2.peers.RequestKey;
 import tech.pegasys.teku.networking.eth2.rpc.core.PeerRequiredLocalMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -51,8 +53,17 @@ public class LightClientUpdatesByRangeMessageHandler
       return;
     }
 
+    final Optional<RequestKey> maybeRequestKey =
+        peer.approveLightClientUpdatesRequest(callback, count);
+    if (maybeRequestKey.isEmpty()) {
+      return;
+    }
+
     final List<LightClientUpdate> updates =
         lightClientUpdateStore.getBestUpdatesInRange(startPeriod, count);
+    if (updates.size() != count) {
+      peer.adjustLightClientUpdatesRequest(maybeRequestKey.get(), updates.size());
+    }
 
     SafeFuture<Void> future = SafeFuture.COMPLETE;
     for (final LightClientUpdate update : updates) {
