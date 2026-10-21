@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.forkchoice;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -77,13 +78,16 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodySchemaGloas;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.PowBlock;
@@ -97,8 +101,11 @@ import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
 import tech.pegasys.teku.spec.executionlayer.ExecutionPayloadStatus;
@@ -180,6 +187,15 @@ class ForkChoiceTest {
   }
 
   private void setupWithSpec(final Spec unmockedSpec, final StoreConfig storeConfig) {
+    setupWithSpec(unmockedSpec, storeConfig, true);
+  }
+
+  private void setupWithSpec(final Spec unmockedSpec, final boolean initializeGenesis) {
+    setupWithSpec(unmockedSpec, StoreConfig.createDefault(), initializeGenesis);
+  }
+
+  private void setupWithSpec(
+      final Spec unmockedSpec, final StoreConfig storeConfig, final boolean initializeGenesis) {
     unmockedSpec.reinitializeForTesting(
         (block) -> blobSidecarsAvailabilityChecker,
         AvailabilityCheckerFactory.NOOP_DATACOLUMN_SIDECAR,
@@ -219,7 +235,9 @@ class ForkChoiceTest {
     when(transitionBlockValidator.verifyAncestorTransitionBlock(any()))
         .thenReturn(SafeFuture.completedFuture(PayloadValidationResult.VALID));
     setForkChoiceNotifierForkChoiceUpdatedResult(PayloadStatus.VALID);
-    recentChainData.initializeFromGenesis(genesis.getState(), UInt64.ZERO);
+    if (initializeGenesis) {
+      recentChainData.initializeFromGenesis(genesis.getState(), UInt64.ZERO);
+    }
     reset(
         forkChoiceNotifier,
         transitionBlockValidator); // Clear any notifications from setting genesis
@@ -387,6 +405,8 @@ class ForkChoiceTest {
     setupWithSpec(TestSpecFactory.createMinimalFulu());
     final DataAvailabilitySampler dataAvailabilitySampler = mock(DataAvailabilitySampler.class);
     when(dataAvailabilitySampler.checkSamplingEligibility(any()))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
+    when(dataAvailabilitySampler.checkSamplingEligibility(any(), anyBoolean()))
         .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
     when(dataAvailabilitySampler.checkDataAvailability(any(), any()))
         .thenReturn(new SafeFuture<>());
@@ -1823,6 +1843,154 @@ class ForkChoiceTest {
   }
 
   @Test
+  void onExecutionPayloadEnvelope_shouldReturnUnknownRootBeforeStoreInitialization() {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), false);
+    final SignedExecutionPayloadEnvelope envelope =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+
+    assertThat(forkChoice.onExecutionPayloadEnvelope(envelope, executionLayer))
+        .isCompletedWithValue(ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void onBlock_shouldRecoverFullParentFromStateOnlyCheckpoint(final boolean skippedSlot)
+      throws Exception {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)),
+        false);
+    final UInt64 checkpointSlot = spec.computeStartSlotAtEpoch(ONE);
+    chainBuilder.generateBlocksUpToSlot(skippedSlot ? checkpointSlot.minus(1) : checkpointSlot);
+    final SignedBlockAndState anchorBlock = chainBuilder.getLatestBlockAndState();
+    final BeaconState checkpointState =
+        skippedSlot
+            ? spec.processSlots(anchorBlock.getState(), checkpointSlot)
+            : anchorBlock.getState();
+    final AnchorPoint anchor = AnchorPoint.fromInitialState(spec, checkpointState);
+    recentChainData.initializeFromAnchorPoint(anchor, ZERO);
+    final UInt64 childSlot = checkpointSlot.plus(1);
+    final SignedExecutionPayloadEnvelope envelope =
+        chainBuilder.getExecutionPayloadAtSlot(anchorBlock.getSlot()).orElseThrow();
+    final SignedBlockAndState child =
+        chainBuilder.generateBlockAtSlot(
+            childSlot,
+            BlockOptions.create()
+                .setExecutionPayload(
+                    dataStructureUtil.randomExecutionPayload(
+                        childSlot,
+                        builder ->
+                            builder
+                                .parentHash(envelope.getMessage().getPayload().getBlockHash())
+                                .prevRandao(
+                                    spec.atSlot(childSlot)
+                                        .beaconStateAccessors()
+                                        .getRandaoMix(
+                                            checkpointState,
+                                            spec.computeEpochAtSlot(checkpointSlot))))));
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(childSlot);
+
+    assertThat(recentChainData.getStore().getBlockIfAvailable(anchor.getRoot())).isEmpty();
+    assertThat(
+            forkChoice.onBlock(
+                child.getBlock(), Optional.empty(), BlockBroadcastValidator.NOOP, executionLayer))
+        .isCompletedWithValue(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+    assertThat(recentChainData.getStore().containsBlock(child.getRoot())).isFalse();
+
+    final SignedExecutionPayloadEnvelope invalidEnvelope =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelopeForBlock(anchorBlock.getBlock());
+    assertThat(forkChoice.onExecutionPayloadEnvelope(invalidEnvelope, executionLayer))
+        .isCompletedWithValueMatching(result -> !result.isSuccessful());
+    assertThat(recentChainData.getStore().getExecutionPayloadIfAvailable(anchor.getRoot()))
+        .isEmpty();
+
+    assertThat(forkChoice.onExecutionPayloadEnvelope(envelope, executionLayer))
+        .isCompletedWithValueMatching(ExecutionPayloadImportResult::isSuccessful);
+    assertThat(recentChainData.getStore().getBlockIfAvailable(anchor.getRoot())).isEmpty();
+    assertThat(recentChainData.retrieveSignedExecutionPayloadByBlockRoot(anchor.getRoot()))
+        .isCompletedWithValue(Optional.of(envelope));
+    importBlock(child);
+    final ReadOnlyForkChoiceStrategy strategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(strategy.getBlockData(anchor.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isPresent();
+    assertThat(strategy.getBlockData(child.getRoot()).orElseThrow().getExecutionBlockHash())
+        .isEqualTo(envelope.getMessage().getPayload().getBlockHash());
+    assertThat(strategy.getParentBeaconBlockNode(ForkChoiceNode.createBase(child.getRoot())))
+        .contains(ForkChoiceNode.createFull(anchor.getRoot()));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void onBlock_gloasGenesisChildShouldBuildOnGenesisFullPayload(
+      final boolean genesisPayloadApplied) {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    if (genesisPayloadApplied) {
+      // GenesisHandler and BeaconChainController apply the synthetic genesis envelope before any
+      // block can be imported on a Gloas genesis network
+      assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+    }
+    final BeaconStateGloas genesisState = BeaconStateGloas.required(genesis.getState());
+    final SignedBlockAndState child = chainBuilder.generateBlockAtSlot(ONE);
+    // The genesis bid carries the genesis execution block hash, so the first block builds on the
+    // genesis FULL payload rather than on EMPTY
+    assertThat(
+            child
+                .getBlock()
+                .getMessage()
+                .getBody()
+                .getOptionalSignedExecutionPayloadBid()
+                .orElseThrow()
+                .getMessage()
+                .getParentBlockHash())
+        .isEqualTo(genesisState.getLatestExecutionPayloadBid().getBlockHash())
+        .isEqualTo(genesisState.getLatestBlockHash());
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(child.getSlot());
+
+    final SafeFuture<BlockImportResult> result =
+        forkChoice.onBlock(
+            child.getBlock(), Optional.empty(), BlockBroadcastValidator.NOOP, executionLayer);
+
+    if (!genesisPayloadApplied) {
+      assertThat(result)
+          .isCompletedWithValue(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+      assertThat(recentChainData.getStore().containsBlock(child.getRoot())).isFalse();
+      return;
+    }
+    assertThat(result).isCompletedWithValueMatching(BlockImportResult::isSuccessful);
+    final ReadOnlyForkChoiceStrategy strategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(strategy.getParentBeaconBlockNode(ForkChoiceNode.createBase(child.getRoot())))
+        .contains(ForkChoiceNode.createFull(genesis.getRoot()));
+    assertThat(strategy.getBlockData(child.getRoot()).orElseThrow().getExecutionBlockHash())
+        .isEqualTo(genesisState.getLatestBlockHash());
+  }
+
+  @Test
+  void onBlock_shouldNotRequireEnvelopeForPreGloasCheckpoint() throws Exception {
+    setupWithSpec(TestSpecFactory.createMinimalWithGloasForkEpoch(ONE), false);
+    final UInt64 forkSlot = spec.computeStartSlotAtEpoch(ONE);
+    chainBuilder.generateBlocksUpToSlot(forkSlot.minus(1));
+    final SignedBlockAndState anchorBlock = chainBuilder.getLatestBlockAndState();
+    final BeaconState checkpointState = spec.processSlots(anchorBlock.getState(), forkSlot);
+    recentChainData.initializeFromAnchorPoint(
+        AnchorPoint.fromInitialState(spec, checkpointState), ZERO);
+    final SignedBlockAndState child = chainBuilder.generateBlockAtSlot(forkSlot.plus(1));
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(child.getSlot());
+
+    assertThat(
+            spec.atSlot(child.getSlot())
+                .getForkChoiceUtil()
+                .checkOnBlockConditions(
+                    child.getBlock(),
+                    spec.processSlots(checkpointState, child.getSlot()),
+                    recentChainData.getStore()))
+        .matches(BlockImportResult::isSuccessful);
+  }
+
+  @Test
   void onBlock_gloasShouldReportUnknownParentPayloadBeforeCheckingAncestry() {
     // A block building on a parent payload that has not arrived yet is queued for that payload,
     // not rejected: the finalized ancestry walk starts from FULL(parent), which does not exist yet.
@@ -2246,6 +2414,286 @@ class ForkChoiceTest {
         .getSignedExecutionPayloadBid()
         .getMessage()
         .getParentBlockHash();
+  }
+
+  @Test
+  void applyGenesisExecutionPayloadForGloas_shouldSeedGenesisPayloadMatchingGenesisBid() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    final BeaconStateGloas genesisState = BeaconStateGloas.required(genesis.getState());
+    final ExecutionPayloadBid genesisBid = genesisState.getLatestExecutionPayloadBid();
+    final ExecutionPayload genesisPayload =
+        recentChainData
+            .getStore()
+            .getExecutionPayloadIfAvailable(genesis.getRoot())
+            .orElseThrow()
+            .getMessage()
+            .getPayload();
+    // The envelope is persisted as the genesis block's blinded envelope and validated against the
+    // genesis block bid when fork choice is rebuilt on restart, so it must mirror that bid.
+    assertThat(genesisPayload.getBlockHash()).isEqualTo(genesisState.getLatestBlockHash());
+    assertThat(genesisPayload.getParentHash()).isEqualTo(genesisBid.getParentBlockHash());
+    assertThat(genesisPayload.getGasLimit()).isEqualTo(genesisBid.getGasLimit());
+    assertThat(
+            recentChainData
+                .getForkChoiceStrategy()
+                .orElseThrow()
+                .getBlockData(genesis.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL)
+                .map(ProtoNodeData::getExecutionBlockHash))
+        .contains(genesisState.getLatestBlockHash());
+  }
+
+  @Test
+  void applyGenesisExecutionPayloadForGloas_shouldNotSeedPayloadWhenGenesisBidCommitsToNoBlock() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    // Genesis as produced by the pyspec helper and by eth-beacon-genesis (Kurtosis): the genesis
+    // bid names the EL genesis block only as its parent, so the genesis block is EMPTY
+    final BeaconState emptyGenesisState = withEmptyGenesisBidBlockHash(genesis.getState());
+    final Bytes32 genesisExecutionBlockHash =
+        BeaconStateGloas.required(emptyGenesisState).getLatestBlockHash();
+    final StorageSystem emptyGenesisStorageSystem =
+        InMemoryStorageSystemBuilder.create()
+            .storageMode(StateStorageMode.PRUNE)
+            .specProvider(spec)
+            .numberOfValidators(16)
+            .build();
+    final ChainUpdater chainUpdater = emptyGenesisStorageSystem.chainUpdater();
+    chainUpdater.initializeGenesis(emptyGenesisState);
+    final RecentChainData emptyGenesisRecentChainData = emptyGenesisStorageSystem.recentChainData();
+    final ForkChoice emptyGenesisForkChoice = createForkChoice(emptyGenesisRecentChainData);
+    final Bytes32 genesisRoot = emptyGenesisRecentChainData.getBestBlockRoot().orElseThrow();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        emptyGenesisRecentChainData.getForkChoiceStrategy().orElseThrow();
+
+    assertThat(emptyGenesisForkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    assertThat(emptyGenesisRecentChainData.getStore().getExecutionPayloadIfAvailable(genesisRoot))
+        .isEmpty();
+    assertThat(
+            forkChoiceStrategy.getBlockData(
+                genesisRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isEmpty();
+    assertThat(
+            forkChoiceStrategy
+                .getBlockData(genesisRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY)
+                .map(ProtoNodeData::getExecutionBlockHash))
+        .contains(genesisExecutionBlockHash);
+
+    // The slot-1 block builds on EMPTY(genesis), naming the EL genesis block as its parent, and
+    // needs no genesis payload to be imported
+    final ChainBuilder emptyGenesisChainBuilder = emptyGenesisStorageSystem.chainBuilder();
+    final SignedBlockAndState block =
+        emptyGenesisChainBuilder.generateBlockAtSlot(
+            ONE, emptyGenesisChainBuilder.createBlockOptionsBuildingOnEmptyParent(ONE));
+    chainUpdater.advanceCurrentSlotToAtLeast(block.getSlot());
+    final SafeFuture<BlockImportResult> result =
+        emptyGenesisForkChoice.onBlock(
+            block.getBlock(), Optional.empty(), blockBroadcastValidator, executionLayer);
+    assertBlockImportedSuccessfully(result, false);
+    assertThat(
+            forkChoiceStrategy
+                .getBlockData(block.getRoot())
+                .map(ProtoNodeData::getExecutionBlockHash))
+        .contains(genesisExecutionBlockHash);
+    assertThatCode(emptyGenesisStorageSystem::restarted).doesNotThrowAnyException();
+  }
+
+  @Test
+  void
+      applyGenesisExecutionPayloadForGloas_shouldReseedOnlyGenesisPayloadOnRestartBeforeFinalization() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+    final Bytes32 genesisExecutionBlockHash =
+        BeaconStateGloas.required(genesis.getState()).getLatestBlockHash();
+    final SignedBlockAndState head = storageSystem.chainUpdater().advanceChainUntil(3);
+
+    // The genesis block is still a hot block, so its persisted envelope is validated on rebuild
+    final StorageSystem restartedStorageSystem = storageSystem.restarted();
+    final RecentChainData restartedRecentChainData = restartedStorageSystem.recentChainData();
+    final SignedBlindedExecutionPayloadEnvelope headEnvelope =
+        restartedStorageSystem
+            .database()
+            .getBlindedExecutionPayloadEnvelope(head.getRoot())
+            .orElseThrow();
+    final ForkChoice restartedForkChoice = createForkChoice(restartedRecentChainData);
+
+    assertThat(restartedForkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    // The in-memory payload cache is not restored from the database, so the genesis payload is
+    // seeded again for blocks building on the genesis FULL payload
+    assertThat(
+            restartedRecentChainData
+                .getStore()
+                .getExecutionPayloadIfAvailable(genesis.getRoot())
+                .map(envelope -> envelope.getMessage().getPayload().getBlockHash()))
+        .contains(genesisExecutionBlockHash);
+    // Other blocks keep their real envelopes
+    assertThat(restartedRecentChainData.getStore().getExecutionPayloadIfAvailable(head.getRoot()))
+        .isEmpty();
+    assertThat(restartedStorageSystem.database().getBlindedExecutionPayloadEnvelope(head.getRoot()))
+        .contains(headEnvelope);
+    assertThatCode(restartedStorageSystem::restarted).doesNotThrowAnyException();
+  }
+
+  @Test
+  void applyGenesisExecutionPayloadForGloas_shouldBeNoOpOnRestartAfterFinalization() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+    final ChainUpdater chainUpdater = storageSystem.chainUpdater();
+    chainUpdater.advanceChainUntil(spec.computeStartSlotAtEpoch(UInt64.valueOf(3)));
+    chainUpdater.justifyEpoch(UInt64.valueOf(2));
+    chainUpdater.finalizeEpoch(UInt64.ONE);
+
+    final StorageSystem restartedStorageSystem = storageSystem.restarted();
+    final RecentChainData restartedRecentChainData = restartedStorageSystem.recentChainData();
+    // As in BeaconChainController, the head is selected while fork choice is constructed
+    final ForkChoice restartedForkChoice = createForkChoice(restartedRecentChainData);
+    final Bytes32 headRoot = restartedRecentChainData.getBestBlockRoot().orElseThrow();
+    assertThat(headRoot).isNotEqualTo(genesis.getRoot());
+    final Bytes32 finalizedRoot =
+        restartedRecentChainData.getStore().getLatestFinalized().getRoot();
+    final SignedBlindedExecutionPayloadEnvelope headEnvelope =
+        restartedStorageSystem
+            .database()
+            .getBlindedExecutionPayloadEnvelope(headRoot)
+            .orElseThrow();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        restartedRecentChainData.getForkChoiceStrategy().orElseThrow();
+    final ProtoNodeData headFullNode =
+        forkChoiceStrategy
+            .getBlockData(headRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL)
+            .orElseThrow();
+
+    assertThat(restartedForkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    assertThat(restartedRecentChainData.getStore().getExecutionPayloadIfAvailable(headRoot))
+        .isEmpty();
+    assertThat(restartedRecentChainData.getStore().getExecutionPayloadIfAvailable(finalizedRoot))
+        .isEmpty();
+    assertThat(restartedStorageSystem.database().getBlindedExecutionPayloadEnvelope(headRoot))
+        .contains(headEnvelope);
+    assertThat(
+            forkChoiceStrategy.getBlockData(headRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .contains(headFullNode);
+    // The real envelope is still the one validated against the block bid on the next restart
+    assertThatCode(restartedStorageSystem::restarted).doesNotThrowAnyException();
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void applyGenesisExecutionPayloadForGloas_shouldNotMarkCheckpointAnchorAsFull(
+      final boolean stateOnlyAnchor) {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+    storageSystem.chainUpdater().advanceChainUntil(spec.computeStartSlotAtEpoch(UInt64.valueOf(3)));
+    final SignedBlockAndState anchorBlockAndState =
+        chainBuilder.getLatestBlockAndStateAtEpochBoundary(UInt64.valueOf(2));
+    final AnchorPoint anchor =
+        stateOnlyAnchor
+            ? AnchorPoint.fromInitialState(spec, anchorBlockAndState.getState())
+            : AnchorPoint.fromInitialBlockAndState(spec, anchorBlockAndState);
+
+    final StorageSystem checkpointStorageSystem =
+        InMemoryStorageSystemBuilder.create()
+            .storageMode(StateStorageMode.PRUNE)
+            .specProvider(spec)
+            .numberOfValidators(16)
+            .build();
+    final RecentChainData checkpointRecentChainData = checkpointStorageSystem.recentChainData();
+    checkpointRecentChainData.initializeFromAnchorPoint(
+        anchor, spec.computeTimeAtSlot(anchor.getBlockSlot(), genesis.getState().getGenesisTime()));
+    final ForkChoice checkpointForkChoice = createForkChoice(checkpointRecentChainData);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        checkpointRecentChainData.getForkChoiceStrategy().orElseThrow();
+    final ChainHead headBefore = checkpointRecentChainData.getChainHead().orElseThrow();
+    assertThat(headBefore.getRoot()).isEqualTo(anchor.getRoot());
+    assertThat(
+            forkChoiceStrategy.getBlockData(
+                anchor.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isEmpty();
+
+    assertThat(checkpointForkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    // The anchor payload must be recovered from the real envelope, not a synthetic one
+    assertThat(
+            checkpointRecentChainData.getStore().getExecutionPayloadIfAvailable(anchor.getRoot()))
+        .isEmpty();
+    assertThat(
+            forkChoiceStrategy.getBlockData(
+                anchor.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isEmpty();
+    assertThat(
+            checkpointStorageSystem.database().getBlindedExecutionPayloadEnvelope(anchor.getRoot()))
+        .isEmpty();
+    assertThat(checkpointRecentChainData.getChainHead().orElseThrow().getPayloadStatus())
+        .isEqualTo(headBefore.getPayloadStatus());
+  }
+
+  private BeaconState withEmptyGenesisBidBlockHash(final BeaconState genesisState) {
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions());
+    return genesisState.updated(
+        state -> {
+          final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(state);
+          final ExecutionPayloadBid bid = stateGloas.getLatestExecutionPayloadBid();
+          stateGloas.setLatestExecutionPayloadBid(
+              schemaDefinitions
+                  .getExecutionPayloadBidSchema()
+                  .create(
+                      bid.getParentBlockHash(),
+                      bid.getParentBlockRoot(),
+                      Bytes32.ZERO,
+                      bid.getPrevRandao(),
+                      bid.getFeeRecipient(),
+                      bid.getGasLimit(),
+                      bid.getBuilderIndex(),
+                      bid.getSlot(),
+                      bid.getValue(),
+                      bid.getExecutionPayment(),
+                      bid.getBlobKzgCommitments(),
+                      bid.getExecutionRequestsRoot()));
+          // The genesis block body embeds the bid, so the latest block header must follow it
+          final BeaconBlockHeader header = state.getLatestBlockHeader();
+          state.setLatestBlockHeader(
+              new BeaconBlockHeader(
+                  header.getSlot(),
+                  header.getProposerIndex(),
+                  header.getParentRoot(),
+                  header.getStateRoot(),
+                  schemaDefinitions
+                      .getBeaconBlockBodySchema()
+                      .createGenesisBody(state)
+                      .hashTreeRoot()));
+        });
+  }
+
+  private ForkChoice createForkChoice(final RecentChainData recentChainData) {
+    return new ForkChoice(
+        spec,
+        eventThread,
+        recentChainData,
+        forkChoiceNotifier,
+        new ForkChoiceStateProvider(eventThread, recentChainData),
+        new TickProcessor(spec, recentChainData),
+        transitionBlockValidator,
+        FastConfirmationTracker.NOOP,
+        DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED,
+        LateBlockReorgPreparationHandler.NOOP,
+        debugDataDumper,
+        metricsSystem,
+        AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE));
   }
 
   private void importPayload(final SignedBlockAndState targetBlock) {

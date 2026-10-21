@@ -1593,7 +1593,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
       final PayloadAttestationMessageGossipValidator validator =
           new PayloadAttestationMessageGossipValidator(
-              spec, gossipValidationHelper, invalidBlockRoots);
+              spec, gossipValidationHelper, signatureVerificationService, invalidBlockRoots);
       pendingPayloadAttestations =
           poolFactory.createPendingPoolForPayloadAttestations(
               spec, beaconConfig.eth2NetworkConfig().getPendingPayloadAttestationsMaxQueue());
@@ -2250,6 +2250,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
           new LightClientOptimisticUpdateGossipValidator(
               spec, recentChainData, lightClientUpdateStore, timeProvider);
       p2pNetworkBuilder
+          .lightClientUpdateStore(lightClientUpdateStore)
           .gossipedLightClientFinalityUpdateProcessor(
               (update, arrivalTimestamp) -> finalityValidator.validate(update))
           .gossipedLightClientOptimisticUpdateProcessor(
@@ -2610,6 +2611,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
             beaconConfig.eth2NetworkConfig().isForkChoiceUpdatedAlwaysSendPayloadAttributes(),
             proposerPreferencesManager);
     eventChannels.subscribe(SlotEventsChannel.class, proposersDataManager);
+    // the fee recipient is only cached once our own proposer preferences have been accepted
+    proposerPreferencesManager.subscribeOperationAdded(
+        new LocalOperationAcceptedFilter<>(
+            proposersDataManager::updatePreparedProposerFromAcceptedProposerPreferences));
     forkChoiceNotifier =
         new ForkChoiceNotifierImpl(
             eventThread,

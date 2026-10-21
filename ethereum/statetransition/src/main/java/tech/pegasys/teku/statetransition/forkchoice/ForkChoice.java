@@ -53,12 +53,13 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.cache.CapturingIndexedAttestationCache;
 import tech.pegasys.teku.spec.cache.IndexedAttestationCache;
+import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -75,6 +76,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.VoteUpdater;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
@@ -84,6 +86,7 @@ import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.logic.common.execution.ExecutionPayloadVerificationException;
+import tech.pegasys.teku.spec.logic.common.execution.ExecutionPayloadVerifier;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityChecker;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
@@ -276,15 +279,38 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
+    final Bytes32 blockRoot = signedEnvelope.getBeaconBlockRoot();
+    final Optional<AnchorPoint> stateOnlyAnchor =
+        recentChainData
+            .getLatestFinalized()
+            .filter(anchor -> anchor.getRoot().equals(blockRoot))
+            .filter(anchor -> anchor.getSignedBeaconBlock().isEmpty())
+            .filter(anchor -> anchor.getState().toVersionGloas().isPresent());
+    if (stateOnlyAnchor.isPresent()) {
+      return verifyAndImportExecutionPayloadEnvelope(
+          signedEnvelope,
+          stateOnlyAnchor.get().getState(),
+          stateOnlyAnchor,
+          executionLayer,
+          receivedExecutionPayloadEventsChannelPublisher);
+    }
     return recentChainData
-        .retrieveBlockAndState(signedEnvelope.getBeaconBlockRoot())
+        .retrieveBlockAndState(blockRoot)
         .thenCompose(
             maybeBlockAndState ->
-                onExecutionPayloadEnvelope(
-                    signedEnvelope,
-                    maybeBlockAndState,
-                    executionLayer,
-                    receivedExecutionPayloadEventsChannelPublisher));
+                maybeBlockAndState
+                    .map(
+                        blockAndState ->
+                            verifyAndImportExecutionPayloadEnvelope(
+                                signedEnvelope,
+                                blockAndState.getState(),
+                                Optional.empty(),
+                                executionLayer,
+                                receivedExecutionPayloadEventsChannelPublisher))
+                    .orElseGet(
+                        () ->
+                            SafeFuture.completedFuture(
+                                ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT)));
   }
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
@@ -658,30 +684,17 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
             });
   }
 
-  /**
-   * Import an execution payload envelope to the store. The supplied {@code blockAndState} must
-   * contain the block and post-state after processing the block whose root is the beacon block root
-   * of the execution payload
-   */
-  private SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
+  private SafeFuture<ExecutionPayloadImportResult> verifyAndImportExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
-      final Optional<SignedBlockAndState> blockAndState,
+      final BeaconState state,
+      final Optional<AnchorPoint> stateOnlyAnchor,
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
-    if (blockAndState.isEmpty()) {
-      return SafeFuture.completedFuture(
-          ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
-    }
-
-    final SignedBeaconBlock block = blockAndState.get().getBlock();
-    final BeaconState state = blockAndState.get().getState();
-
     final ForkChoiceUtil forkChoiceUtil = spec.atSlot(signedEnvelope.getSlot()).getForkChoiceUtil();
 
     final AvailabilityChecker<?> availabilityChecker =
-        forkChoiceUtil.createAvailabilityCheckerOnExecutionPayloadEnvelope(block, signedEnvelope);
-    availabilityChecker.initiateDataAvailabilityCheck();
+        forkChoiceUtil.createAvailabilityCheckerOnExecutionPayloadEnvelope(state, signedEnvelope);
     final ForkChoicePayloadExecutorGloas payloadExecutor =
         ForkChoicePayloadExecutorGloas.create(signedEnvelope, executionLayer);
 
@@ -690,10 +703,20 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     // signature verification the same way every other verification path does.
     final BLSSignatureVerifier envelopeSignatureVerifier =
         spec.atSlot(signedEnvelope.getSlot()).getConfig().getBLSSignatureVerifier();
+    final ExecutionPayloadVerifier verifier =
+        spec.getExecutionPayloadVerifier(signedEnvelope.getSlot());
     try {
-      spec.getExecutionPayloadVerifier(signedEnvelope.getSlot())
-          .verifyExecutionPayloadEnvelope(
-              signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      if (stateOnlyAnchor.isPresent()) {
+        // The anchor state may be advanced past its block; verify at the block's slot.
+        verifier.verifyCheckpointAnchorExecutionPayloadEnvelope(
+            signedEnvelope,
+            stateOnlyAnchor.get(),
+            envelopeSignatureVerifier,
+            Optional.of(payloadExecutor));
+      } else {
+        verifier.verifyExecutionPayloadEnvelope(
+            signedEnvelope, state, envelopeSignatureVerifier, Optional.of(payloadExecutor));
+      }
     } catch (final ExecutionPayloadVerificationException ex) {
       final ExecutionPayloadImportResult result =
           ExecutionPayloadImportResult.failedVerification(ex);
@@ -701,6 +724,9 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       return SafeFuture.completedFuture(result);
     }
 
+    // Reject invalid envelopes before starting sampling. Verification starts the asynchronous EL
+    // request without awaiting it, so DA sampling and EL validation still run concurrently.
+    availabilityChecker.initiateDataAvailabilityCheck();
     final SafeFuture<? extends DataAndValidationResult<?>> dataAndValidationResultFuture =
         availabilityChecker
             .getAndLogAvailabilityCheckResult(LOG)
@@ -920,36 +946,69 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   }
 
   /**
-   * Apply the genesis execution payload envelope to the store. No-op for pre-Gloas genesis.
+   * Seed the genesis execution payload envelope into the store when the genesis block commits to
+   * the genesis EL block as its own payload. No-op for pre-Gloas genesis, and no-op unless the
+   * finalized anchor is still the genesis block and no payload is cached for it.
    *
-   * <p>Gloas-and-later defines the chain head as a (block, payload) pair, so at genesis we seed a
-   * FULL fork-choice node by importing an envelope whose payload carries the genesis EL block hash.
-   * Without this, {@code internalGetPayloadId} sees a zero parent execution hash at slot 1 and
-   * erroneously falls into the pre-merge branch.
+   * <p>The spec's {@code get_forkchoice_store} seeds no payload for the anchor: a genesis produced
+   * by the pyspec helper or by eth-beacon-genesis leaves the genesis bid's {@code block_hash} empty
+   * while {@code latest_block_hash} is the EL genesis hash, so the genesis block is EMPTY, the
+   * slot-1 block builds on EMPTY(genesis) and no genesis payload is ever required. Teku's own
+   * {@code GenesisGenerator} instead sets the bid's {@code block_hash} to the EL genesis hash,
+   * which makes the genesis block FULL: a child then builds on FULL(genesis) and cannot be imported
+   * until a payload for genesis is known, so for that convention we seed a FULL fork-choice node by
+   * importing an envelope whose payload carries the genesis EL block hash. The two conventions are
+   * told apart with the spec's parent-full condition on the genesis state, {@code latest_block_hash
+   * == latest_execution_payload_bid.block_hash}.
+   *
+   * <p>This is also called on every startup. Once the finalized anchor has moved past genesis
+   * (restart after finalization, checkpoint sync) there is nothing to seed: the real envelopes are
+   * recovered from the database or from peers. While the genesis block is still the anchor, a
+   * restart only needs the in-memory payload cache repopulated, since that cache is not restored
+   * from the database and the fork choice already has the genesis FULL node.
+   *
+   * <p>The envelope is persisted as the genesis block's blinded envelope and validated against the
+   * genesis block bid when fork choice is rebuilt on restart, so its payload must mirror that bid.
    */
   public SafeFuture<Void> applyGenesisExecutionPayloadForGloas() {
     if (spec.getGenesisSpecConfig().getMilestone().isLessThan(SpecMilestone.GLOAS)) {
       return SafeFuture.COMPLETE;
     }
+    if (recentChainData.isPreGenesis()) {
+      return SafeFuture.COMPLETE;
+    }
+    final AnchorPoint latestFinalized = recentChainData.getStore().getLatestFinalized();
+    if (!latestFinalized.getBlockSlot().equals(SpecConfig.GENESIS_SLOT)) {
+      return SafeFuture.COMPLETE;
+    }
+    final Bytes32 genesisBlockRoot = latestFinalized.getRoot();
+    if (recentChainData.getStore().getExecutionPayloadIfAvailable(genesisBlockRoot).isPresent()) {
+      return SafeFuture.COMPLETE;
+    }
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(spec.getGenesisSpec().getSchemaDefinitions());
-    final BeaconStateGloas genesisState =
-        BeaconStateGloas.required(recentChainData.getStore().getLatestFinalized().getState());
+    final BeaconStateGloas genesisState = BeaconStateGloas.required(latestFinalized.getState());
+    final ExecutionPayloadBid genesisBid = genesisState.getLatestExecutionPayloadBid();
     final Bytes32 genesisExecutionBlockHash = genesisState.getLatestBlockHash();
+    if (!genesisExecutionBlockHash.equals(genesisBid.getBlockHash())) {
+      // The genesis block is EMPTY: its bid only names the EL genesis block as parent, so children
+      // build on EMPTY(genesis) and no genesis payload is required
+      return SafeFuture.COMPLETE;
+    }
     final ExecutionPayload genesisPayload =
         schemaDefinitions
             .getExecutionPayloadSchema()
             .createExecutionPayload(
                 builder ->
                     builder
-                        .parentHash(Bytes32.ZERO)
+                        .parentHash(genesisBid.getParentBlockHash())
                         .feeRecipient(Bytes20.ZERO)
                         .stateRoot(Bytes32.ZERO)
                         .receiptsRoot(Bytes32.ZERO)
                         .logsBloom(Bytes.wrap(new byte[256]))
                         .prevRandao(Bytes32.ZERO)
                         .blockNumber(UInt64.ZERO)
-                        .gasLimit(UInt64.ZERO)
+                        .gasLimit(genesisBid.getGasLimit())
                         .gasUsed(UInt64.ZERO)
                         .timestamp(UInt64.ZERO)
                         .extraData(Bytes.EMPTY)
@@ -971,7 +1030,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
                         genesisPayload,
                         schemaDefinitions.getExecutionRequestsSchema().getDefault(),
                         UInt64.ZERO,
-                        recentChainData.getBestBlockRoot().orElseThrow(),
+                        genesisBlockRoot,
                         Bytes32.ZERO),
                 BLSSignature.empty());
 

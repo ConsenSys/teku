@@ -1,3 +1,9 @@
+idea {
+	module {
+		testSources.from(sourceSets.jmh.java.srcDirs)
+	}
+}
+
 dependencies {
 	implementation project(':beacon:pow')
 	implementation project(':ethereum:spec')
