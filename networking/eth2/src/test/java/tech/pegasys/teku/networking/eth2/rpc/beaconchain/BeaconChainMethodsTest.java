@@ -43,6 +43,7 @@ import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarArchiveReconstructor;
 import tech.pegasys.teku.statetransition.datacolumns.log.rpc.DasReqRespLogger;
 import tech.pegasys.teku.statetransition.inclusionlist.InclusionListManager;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -205,6 +206,75 @@ public class BeaconChainMethodsTest {
   }
 
   @Test
+  void shouldNotRegisterLightClientMethodsWhenServerDisabled() {
+    final BeaconChainMethods methods = getMethods(TestSpecFactory.createMinimalAltair());
+
+    assertThat(methods.lightClientFinalityUpdate()).isEmpty();
+    assertThat(methods.lightClientOptimisticUpdate()).isEmpty();
+    assertThat(methods.lightClientUpdatesByRange()).isEmpty();
+    assertThat(methods.lightClientBootstrap()).isEmpty();
+  }
+
+  @Test
+  void shouldNotRegisterLightClientMethodsPreAltair() {
+    final Spec spec = TestSpecFactory.createMinimalPhase0();
+    final BeaconChainMethods methods =
+        getMethods(spec, Optional.of(new LightClientUpdateStore(spec)));
+
+    assertThat(methods.lightClientFinalityUpdate()).isEmpty();
+    assertThat(methods.lightClientOptimisticUpdate()).isEmpty();
+    assertThat(methods.lightClientUpdatesByRange()).isEmpty();
+    assertThat(methods.lightClientBootstrap()).isEmpty();
+  }
+
+  @Test
+  void shouldRegisterLightClientLatestUpdateMethods() {
+    final Spec spec = TestSpecFactory.createMinimalAltair();
+    final BeaconChainMethods methods =
+        getMethods(spec, Optional.of(new LightClientUpdateStore(spec)));
+
+    assertThat(methods.lightClientFinalityUpdate())
+        .hasValueSatisfying(
+            method ->
+                assertThat(method.getIds())
+                    .containsExactly(
+                        "/eth2/beacon_chain/req/light_client_finality_update/1/ssz_snappy"));
+    assertThat(methods.lightClientOptimisticUpdate())
+        .hasValueSatisfying(
+            method ->
+                assertThat(method.getIds())
+                    .containsExactly(
+                        "/eth2/beacon_chain/req/light_client_optimistic_update/1/ssz_snappy"));
+  }
+
+  @Test
+  void shouldRegisterLightClientUpdatesByRange() {
+    final Spec spec = TestSpecFactory.createMinimalAltair();
+    final BeaconChainMethods methods =
+        getMethods(spec, Optional.of(new LightClientUpdateStore(spec)));
+
+    assertThat(methods.lightClientUpdatesByRange())
+        .hasValueSatisfying(
+            method ->
+                assertThat(method.getIds())
+                    .containsExactly(
+                        "/eth2/beacon_chain/req/light_client_updates_by_range/1/ssz_snappy"));
+  }
+
+  @Test
+  void shouldRegisterLightClientBootstrap() {
+    final Spec spec = TestSpecFactory.createMinimalAltair();
+    final BeaconChainMethods methods =
+        getMethods(spec, Optional.of(new LightClientUpdateStore(spec)));
+
+    assertThat(methods.lightClientBootstrap())
+        .hasValueSatisfying(
+            method ->
+                assertThat(method.getIds())
+                    .containsExactly("/eth2/beacon_chain/req/light_client_bootstrap/1/ssz_snappy"));
+  }
+
+  @Test
   public void shouldCreateInclusionListsByIndicesWithHezeEnabled() {
     final BeaconChainMethods methods = getMethods(TestSpecFactory.createMinimalHeze());
 
@@ -232,6 +302,11 @@ public class BeaconChainMethodsTest {
   }
 
   private BeaconChainMethods getMethods(final Spec spec) {
+    return getMethods(spec, Optional.empty());
+  }
+
+  private BeaconChainMethods getMethods(
+      final Spec spec, final Optional<LightClientUpdateStore> lightClientUpdateStore) {
     return BeaconChainMethods.create(
         spec,
         asyncRunner,
@@ -245,6 +320,7 @@ public class BeaconChainMethodsTest {
         metadataMessagesFactory,
         RpcEncoding.createSszSnappyEncoding(spec.getNetworkingConfig().getMaxPayloadSize()),
         DataColumnSidecarArchiveReconstructor.NOOP,
-        DasReqRespLogger.NOOP);
+        DasReqRespLogger.NOOP,
+        lightClientUpdateStore);
   }
 }

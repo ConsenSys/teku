@@ -283,6 +283,9 @@ class ValidatorApiHandlerTest {
         .when(blockProductionPerformanceFactory)
         .createForProduction(any());
     when(chainDataClient.getStore()).thenReturn(store);
+    // Gloas attestation data asks fork choice whether the block's payload is verified; the plain
+    // mock tracks no FULL node, so the attestation committee index stays 0.
+    when(store.getForkChoiceStrategy()).thenReturn(forkChoiceStrategy);
     when(syncStateProvider.getCurrentSyncState()).thenReturn(SyncState.IN_SYNC);
     when(forkChoiceTrigger.prepareForBlockProduction(any(), any()))
         .thenReturn(SafeFuture.completedFuture(chainHead));
@@ -996,10 +999,8 @@ class ValidatorApiHandlerTest {
     when(chainHead.getSlot()).thenReturn(blockAndState.getSlot());
     when(chainHead.getForkChoiceNode())
         .thenReturn(ForkChoiceNode.createEmpty(blockAndState.getRoot()));
-    when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-    when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState.getState())));
+    when(store.retrieveBlockAndState(blockAndState.getRoot()))
+        .thenReturn(completedFuture(Optional.of(blockAndState)));
     when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
     when(chainHead.isOptimistic()).thenReturn(true);
 
@@ -1022,10 +1023,8 @@ class ValidatorApiHandlerTest {
     when(chainHead.getSlot()).thenReturn(blockAndState.getSlot());
     when(chainHead.getForkChoiceNode())
         .thenReturn(ForkChoiceNode.createEmpty(blockAndState.getRoot()));
-    when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-    when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState.getState())));
+    when(store.retrieveBlockAndState(blockAndState.getRoot()))
+        .thenReturn(completedFuture(Optional.of(blockAndState)));
     when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
     final int committeeIndex = 0;
     final SafeFuture<Optional<AttestationData>> result =
@@ -1044,11 +1043,11 @@ class ValidatorApiHandlerTest {
                 UInt64.valueOf(committeeIndex)));
     assertThat(attestationData.getIndex()).isEqualTo(ZERO);
     assertThat(attestationData.getSlot()).isEqualTo(slot);
-    final InOrder inOrder = inOrder(forkChoiceTrigger, chainDataClient);
+    final InOrder inOrder = inOrder(forkChoiceTrigger, store);
 
     // Ensure we prepare for attestation production prior to getting the block to attest to
     inOrder.verify(forkChoiceTrigger).prepareForAttestationProduction(slot);
-    inOrder.verify(chainDataClient).getBlockByBlockRoot(blockAndState.getRoot());
+    inOrder.verify(store).retrieveBlockAndState(blockAndState.getRoot());
   }
 
   @Nested
@@ -1093,10 +1092,8 @@ class ValidatorApiHandlerTest {
       when(chainHead.getForkChoiceNode()).thenReturn(selectedNode);
       when(chainHead.isOptimistic()).thenReturn(true);
       when(chainDataClient.isOptimisticBlock(blockAndState.getRoot())).thenReturn(false);
-      when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-      when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getState())));
+      when(store.retrieveBlockAndState(blockAndState.getRoot()))
+          .thenReturn(completedFuture(Optional.of(blockAndState)));
 
       assertThatSafeFuture(validatorApiHandler.createAttestationData(slot, 0))
           .isCompletedExceptionallyWith(NodeSyncingException.class);
@@ -1121,10 +1118,8 @@ class ValidatorApiHandlerTest {
       when(store.getForkChoiceStrategy()).thenReturn(forkChoiceStrategy);
       when(forkChoiceStrategy.getAncestorNodeData(newerHead, slot))
           .thenReturn(Optional.of(ancestorData));
-      when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-      when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getState())));
+      when(store.retrieveBlockAndState(blockAndState.getRoot()))
+          .thenReturn(completedFuture(Optional.of(blockAndState)));
 
       assertThatSafeFuture(validatorApiHandler.createAttestationData(slot, 0))
           .isCompletedExceptionallyWith(NodeSyncingException.class);
@@ -1132,7 +1127,7 @@ class ValidatorApiHandlerTest {
     }
 
     @TestTemplate
-    void shouldFailWhenCanonicalAncestorIsUnavailable() {
+    void shouldReturnEmptyWhenCanonicalAncestorIsUnavailable() {
       final UInt64 slot = epochStartSlot.increment();
       when(chainDataClient.getCurrentSlot()).thenReturn(slot.increment());
       when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
@@ -1143,7 +1138,7 @@ class ValidatorApiHandlerTest {
       when(store.getForkChoiceStrategy()).thenReturn(forkChoiceStrategy);
 
       assertThatSafeFuture(validatorApiHandler.createAttestationData(slot, 0))
-          .isCompletedExceptionallyWith(IllegalStateException.class);
+          .isCompletedWithEmptyOptional();
     }
 
     @TestTemplate
@@ -1151,21 +1146,19 @@ class ValidatorApiHandlerTest {
       final UInt64 slot = epochStartSlot.increment();
       final SignedBlockAndState blockAndState =
           dataStructureUtil.randomSignedBlockAndState(epochStartSlot);
-      final SafeFuture<Optional<BeaconState>> pendingState = new SafeFuture<>();
+      final SafeFuture<Optional<SignedBlockAndState>> pendingBlockAndState = new SafeFuture<>();
       when(chainDataClient.getCurrentSlot()).thenReturn(slot);
       when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
       when(chainDataClient.getChainHead()).thenReturn(Optional.of(chainHead));
       when(chainHead.getSlot()).thenReturn(blockAndState.getSlot());
       when(chainHead.getForkChoiceNode())
           .thenReturn(ForkChoiceNode.createEmpty(blockAndState.getRoot()));
-      when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-      when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot())).thenReturn(pendingState);
+      when(store.retrieveBlockAndState(blockAndState.getRoot())).thenReturn(pendingBlockAndState);
 
       final SafeFuture<Optional<AttestationData>> result =
           validatorApiHandler.createAttestationData(slot, 0);
       when(chainDataClient.getChainHead()).thenReturn(Optional.of(mock(ChainHead.class)));
-      pendingState.complete(Optional.of(blockAndState.getState()));
+      pendingBlockAndState.complete(Optional.of(blockAndState));
 
       assertThat(safeJoin(result).orElseThrow().getIndex()).isEqualTo(ZERO);
     }
@@ -1178,10 +1171,8 @@ class ValidatorApiHandlerTest {
       final SignedBlockAndState blockAndState =
           dataStructureUtil.randomSignedBlockAndState(epochStartSlot);
       when(chainDataClient.getCurrentSlot()).thenReturn(pastSlot ? slot.increment() : slot);
-      when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-      when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState.getState())));
+      when(store.retrieveBlockAndState(blockAndState.getRoot()))
+          .thenReturn(completedFuture(Optional.of(blockAndState)));
       when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
       when(chainDataClient.getChainHead()).thenReturn(Optional.of(chainHead));
       when(chainHead.getSlot()).thenReturn(blockAndState.getSlot());
@@ -1236,6 +1227,53 @@ class ValidatorApiHandlerTest {
     }
   }
 
+  @Nested
+  @TestSpecContext(milestone = {SpecMilestone.FULU, SpecMilestone.GLOAS})
+  class LocallyVerifiedPayloadAttestationDataTest {
+
+    @BeforeEach
+    void setUpForMilestone(final SpecContext specContext) {
+      setUp(specContext.getSpec());
+    }
+
+    @TestTemplate
+    void shouldNotSetIndexFromLocalPayloadWhenForkChoiceHeadIsEmpty(final SpecContext specContext) {
+      final UInt64 slot = epochStartSlot.increment();
+      final SignedBlockAndState blockAndState =
+          dataStructureUtil.randomSignedBlockAndState(epochStartSlot);
+      when(chainDataClient.getCurrentSlot()).thenReturn(slot);
+      when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
+      when(chainDataClient.getSignedBlockAndStateInEffectAtSlot(slot))
+          .thenReturn(completedFuture(Optional.of(blockAndState)));
+      when(store.retrieveBlockAndState(blockAndState.getRoot()))
+          .thenReturn(completedFuture(Optional.of(blockAndState)));
+      if (specContext.getSpecMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
+        // The payload has been received and verified locally...
+        when(store.getExecutionPayloadIfAvailable(blockAndState.getRoot()))
+            .thenReturn(Optional.of(dataStructureUtil.randomSignedExecutionPayloadEnvelope(5)));
+      }
+      // ...but fork choice selected the EMPTY variant (e.g. PTC voted it not timely)
+      when(chainDataClient.getChainHead()).thenReturn(Optional.of(chainHead));
+      when(chainHead.getSlot()).thenReturn(blockAndState.getSlot());
+      when(chainHead.getForkChoiceNode())
+          .thenReturn(ForkChoiceNode.createEmpty(blockAndState.getRoot()));
+
+      final AttestationData data =
+          safeJoin(validatorApiHandler.createAttestationData(slot, 0)).orElseThrow();
+
+      assertThat(data.getBeaconBlockRoot()).isEqualTo(blockAndState.getRoot());
+      assertThat(data.getIndex()).isEqualTo(ZERO);
+      if (specContext.getSpecMilestone().isLessThan(SpecMilestone.GLOAS)) {
+        // Pre-Gloas attestation production is unchanged
+        assertThat(data)
+            .isEqualTo(
+                spec.getGenericAttestationData(
+                    slot, blockAndState.getState(), blockAndState.getBlock().getMessage(), ZERO));
+        verify(chainDataClient, never()).getChainHead();
+      }
+    }
+  }
+
   @Test
   public void createAttestationData_shouldRejectRequestWhenSlotIsInTheFuture() {
     final UInt64 slot = spec.computeStartSlotAtEpoch(EPOCH).plus(ONE);
@@ -1263,10 +1301,8 @@ class ValidatorApiHandlerTest {
     when(chainHead.getSlot()).thenReturn(blockSlot);
     when(chainHead.getForkChoiceNode()).thenReturn(ForkChoiceNode.createEmpty(block.getRoot()));
 
-    when(chainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState.getBlock())));
-    when(chainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState.getState())));
+    when(store.retrieveBlockAndState(blockAndState.getRoot()))
+        .thenReturn(completedFuture(Optional.of(blockAndState)));
 
     when(chainDataClient.getCheckpointState(EPOCH, blockAndState))
         .thenReturn(

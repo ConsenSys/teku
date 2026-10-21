@@ -153,6 +153,49 @@ public class ForkChoiceUtil {
   }
 
   /**
+   * The payload-status-aware counterpart of {@link #getAncestors(ReadOnlyForkChoiceStrategy,
+   * Bytes32, UInt64, UInt64, UInt64)}: walks the chain of fork choice nodes leading to {@code node}
+   * (mirroring {@code get_ancestor(store, node, slot)}) so that every entry carries the payload
+   * status the block has on that chain, rather than discarding it as a block-root walk does.
+   *
+   * @param forkChoiceStrategy the object that stores information on forks and block roots
+   * @param node the fork choice node that dictates the chain we walk backwards from
+   * @param startSlot the first slot (inclusive) of the range
+   * @param count the number of slots in the range
+   * @return the fork choice node on the chain for every slot in the range that has a block, indexed
+   *     by slot; empty when {@code node} is unknown
+   */
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final ForkChoiceNode node,
+      final UInt64 startSlot,
+      final UInt64 count) {
+    final NavigableMap<UInt64, ForkChoiceNode> nodes = new TreeMap<>();
+    if (count.isZero()) {
+      return nodes;
+    }
+    // minus(ONE) because the start block is included
+    final UInt64 endSlot = startSlot.plus(count).minusMinZero(1);
+    Optional<ForkChoiceNode> currentNode = Optional.of(node);
+    Optional<UInt64> currentSlot = forkChoiceStrategy.blockSlot(node.blockRoot());
+    while (currentNode.isPresent() && currentSlot.isPresent()) {
+      final UInt64 slot = currentSlot.get();
+      if (slot.isLessThan(startSlot)) {
+        break;
+      }
+      if (slot.isLessThanOrEqualTo(endSlot)) {
+        nodes.put(slot, currentNode.get());
+      }
+      if (slot.equals(startSlot)) {
+        break;
+      }
+      currentNode = forkChoiceStrategy.getParentBeaconBlockNode(currentNode.get());
+      currentSlot = currentNode.flatMap(parent -> forkChoiceStrategy.blockSlot(parent.blockRoot()));
+    }
+    return nodes;
+  }
+
+  /**
    * @param forkChoiceStrategy the object that stores information on forks and block roots
    * @param root the root that dictates the block/fork that we walk backwards from
    * @param startSlot the slot (exclusive) until which we walk the chain backwards
@@ -692,9 +735,6 @@ public class ForkChoiceUtil {
   public BlockImportResult checkOnBlockConditions(
       final SignedBeaconBlock block, final BeaconState blockSlotState, final ReadOnlyStore store) {
     final UInt64 blockSlot = block.getSlot();
-    if (blockSlotState == null) {
-      return BlockImportResult.FAILED_UNKNOWN_PARENT;
-    }
     if (!blockSlotState.getSlot().equals(blockSlot)) {
       return BlockImportResult.FAILED_INVALID_ANCESTRY;
     }
@@ -705,24 +745,67 @@ public class ForkChoiceUtil {
       // Block is at same slot as its parent or the parent root doesn't match the state
       return BlockImportResult.FAILED_INVALID_ANCESTRY;
     }
+    final Optional<BlockImportResult> parentPayloadFailure =
+        checkParentPayloadVerified(block, blockSlotState, store);
+    if (parentPayloadFailure.isPresent()) {
+      return parentPayloadFailure.get();
+    }
     if (blockIsFromFuture(store, blockSlot)) {
       return BlockImportResult.FAILED_BLOCK_IS_FROM_FUTURE;
     }
     if (!blockDescendsFromLatestFinalizedBlock(
-        block.getSlot(), block.getParentRoot(), store, store.getForkChoiceStrategy())) {
+        block, blockSlotState, store, store.getForkChoiceStrategy())) {
       return BlockImportResult.FAILED_INVALID_ANCESTRY;
     }
     // Successful so far
     return BlockImportResult.successful(block);
   }
 
+  /**
+   * Spec: once the parent is known, {@code on_block} requires the parent's payload to be verified
+   * for a block that builds on it, before the timing and finality checks. Pre-Gloas a block carries
+   * its own payload, so there is nothing to check.
+   *
+   * @return the failure to report, or empty when the block may proceed to the remaining checks
+   */
+  protected Optional<BlockImportResult> checkParentPayloadVerified(
+      final SignedBeaconBlock block, final BeaconState blockSlotState, final ReadOnlyStore store) {
+    return Optional.empty();
+  }
+
   private boolean blockIsFromFuture(final ReadOnlyStore store, final UInt64 blockSlot) {
     return getCurrentSlot(store).compareTo(blockSlot) < 0;
+  }
+
+  /**
+   * Returns whether {@code block} builds on the finalized chain, walking fork choice from the node
+   * the block builds on: pre-Gloas, its parent's base node. {@code blockSlotState} is the block's
+   * pre-state, from which Gloas derives the parent variant.
+   *
+   * <p>Fork choice stops tracking a node once the execution layer has invalidated it, so this walk
+   * also rejects the descendants of an invalidated block or payload, as optimistic sync requires.
+   */
+  public boolean blockDescendsFromLatestFinalizedBlock(
+      final SignedBeaconBlock block,
+      final BeaconState blockSlotState,
+      final ReadOnlyStore store,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy) {
+    return blockDescendsFromLatestFinalizedBlock(
+        block.getSlot(), block.getParentRoot(), store, forkChoiceStrategy);
   }
 
   public boolean blockDescendsFromLatestFinalizedBlock(
       final UInt64 blockSlot,
       final Bytes32 parentBlockRoot,
+      final ReadOnlyStore store,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy) {
+    return blockDescendsFromLatestFinalizedBlock(
+        blockSlot, ForkChoiceNode.createBase(parentBlockRoot), store, forkChoiceStrategy);
+  }
+
+  protected boolean blockDescendsFromLatestFinalizedBlock(
+      final UInt64 blockSlot,
+      final ForkChoiceNode parentNode,
       final ReadOnlyStore store,
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy) {
     final Checkpoint finalizedCheckpoint = store.getFinalizedCheckpoint();
@@ -731,10 +814,7 @@ public class ForkChoiceUtil {
     final UInt64 finalizedEpochStartSlot = getFinalizedCheckpointStartSlot(store);
     return blockIsAfterLatestFinalizedSlot(blockSlot, finalizedEpochStartSlot)
         && hasAncestorAtSlot(
-            forkChoiceStrategy,
-            parentBlockRoot,
-            finalizedEpochStartSlot,
-            finalizedCheckpoint.getRoot());
+            forkChoiceStrategy, parentNode, finalizedEpochStartSlot, finalizedCheckpoint.getRoot());
   }
 
   private boolean blockIsAfterLatestFinalizedSlot(
@@ -744,11 +824,12 @@ public class ForkChoiceUtil {
 
   private boolean hasAncestorAtSlot(
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
-      final Bytes32 root,
+      final ForkChoiceNode node,
       final UInt64 slot,
       final Bytes32 ancestorRoot) {
-    return getAncestor(forkChoiceStrategy, root, slot)
-        .map(ancestorAtSlot -> ancestorAtSlot.equals(ancestorRoot))
+    return forkChoiceStrategy
+        .getAncestorNode(node, slot)
+        .map(ancestorAtSlot -> ancestorAtSlot.blockRoot().equals(ancestorRoot))
         .orElse(false);
   }
 
@@ -935,7 +1016,7 @@ public class ForkChoiceUtil {
   }
 
   public AvailabilityChecker<?> createAvailabilityCheckerOnExecutionPayloadEnvelope(
-      final SignedBeaconBlock block, final SignedExecutionPayloadEnvelope signedEnvelope) {
+      final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
     return AvailabilityChecker.NOOP;
   }
 

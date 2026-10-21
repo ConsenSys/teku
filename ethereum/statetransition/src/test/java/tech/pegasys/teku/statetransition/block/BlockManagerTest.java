@@ -437,7 +437,6 @@ public class BlockManagerTest {
     setupWithSpec(
         TestSpecFactory.createMinimalGloas(
             builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
-    forkChoice.applyGenesisExecutionPayloadForGloas().join();
 
     final List<ParentExecutionPayloadDependency> requiredParentExecutionPayloads =
         new ArrayList<>();
