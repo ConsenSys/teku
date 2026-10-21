@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client;
 
+import com.google.common.base.CharMatcher;
 import com.google.common.net.InetAddresses;
 import java.net.IDN;
 import java.net.URL;
@@ -29,6 +30,10 @@ public class AuthDataResolver {
       // toAddrString from Guava follows RFC 5952
       return "[" + InetAddresses.toAddrString(InetAddresses.forString(ipv6)) + "]";
     }
-    return IDN.toASCII(host).toLowerCase(Locale.ROOT);
+    if (CharMatcher.ascii().matchesAllOf(host)) {
+      return host.toLowerCase(Locale.ROOT);
+    } else {
+      return IDN.toASCII(host).toLowerCase(Locale.ROOT);
+    }
   }
 }
