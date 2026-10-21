@@ -84,7 +84,7 @@
     "tags" : [ "Builder Config" ],
     "operationId" : "setBuilderConfig",
     "summary" : "Set Builder Configuration",
-    "description" : "Set the builder configuration for an individual validator public key.\nThe submission replaces the key's stored configuration in full.\nEach entry in the `builders` array must contain a `url`, and no two entries may share it.\n",
+    "description" : "Set the builder configuration for an individual validator public key. The submission replaces\nthe key's stored configuration in full; the server MUST NOT merge it with what was stored\nbefore.\n\nEach entry in the `builders` array MUST contain a `url`, and no two entries may share both\ntheir `url` and their `auth_data`. The server MUST reject a submission that violates either\nrule with a 400 rather than storing a partial list or silently dropping an entry.\n\nA `POST` body of `{}` stores a configuration with no overrides, which resolves identically to\nhaving none, so it is behaviorally equivalent to `DELETE`. An empty `builders` array is a\nconfiguration that names no builders, not a removal.\n",
     "parameters" : [ {
       "name" : "pubkey",
       "required" : true,
