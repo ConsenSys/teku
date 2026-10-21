@@ -210,14 +210,45 @@ public class StoredBlockMetadata {
         .getOptionalSignedExecutionPayloadBid()
         .map(SignedExecutionPayloadBid::getMessage)
         .map(
-            bid ->
-                new GloasForkChoiceRebuildData(
-                    bid.getParentBlockHash(),
-                    bid.getBlockHash(),
-                    maybeBlindedEnvelope.map(
-                        envelope -> getPayloadBlockNumber(block.getRoot(), bid, envelope)),
-                    maybeBlindedEnvelope.map(
-                        envelope -> getPayloadGasLimit(block.getRoot(), bid, envelope))));
+            bid -> {
+              if (block.getSlot().isZero()) {
+                return extractGenesisGloasForkChoiceRebuildData(
+                    block.getRoot(), bid, maybeBlindedEnvelope);
+              }
+              return new GloasForkChoiceRebuildData(
+                  bid.getParentBlockHash(),
+                  bid.getBlockHash(),
+                  maybeBlindedEnvelope.map(
+                      envelope -> getPayloadBlockNumber(block.getRoot(), bid, envelope)),
+                  maybeBlindedEnvelope.map(
+                      envelope -> getPayloadGasLimit(block.getRoot(), bid, envelope)));
+            });
+  }
+
+  private static GloasForkChoiceRebuildData extractGenesisGloasForkChoiceRebuildData(
+      final Bytes32 blockRoot,
+      final ExecutionPayloadBid bid,
+      final Optional<SignedBlindedExecutionPayloadEnvelope> maybeBlindedEnvelope) {
+    final Optional<ExecutionPayloadHeader> maybePayloadHeader =
+        maybeBlindedEnvelope.map(
+            envelope -> {
+              checkEnvelopeBlockRoot(blockRoot, envelope);
+              return envelope.getMessage().getPayloadHeader();
+            });
+    return new GloasForkChoiceRebuildData(
+        bid.getParentBlockHash(),
+        maybePayloadHeader.map(ExecutionPayloadHeader::getBlockHash).orElse(bid.getBlockHash()),
+        maybePayloadHeader.map(ExecutionPayloadHeader::getBlockNumber),
+        maybePayloadHeader.map(ExecutionPayloadHeader::getGasLimit));
+  }
+
+  private static void checkEnvelopeBlockRoot(
+      final Bytes32 blockRoot, final SignedBlindedExecutionPayloadEnvelope envelope) {
+    checkState(
+        envelope.getBeaconBlockRoot().equals(blockRoot),
+        "Blinded execution payload envelope block root %s does not match stored block root %s",
+        envelope.getBeaconBlockRoot(),
+        blockRoot);
   }
 
   // State-only fallback. latest_execution_payload_bid is the promised (parent_block_hash,
@@ -256,11 +287,7 @@ public class StoredBlockMetadata {
       final Bytes32 blockRoot,
       final ExecutionPayloadBid bid,
       final SignedBlindedExecutionPayloadEnvelope envelope) {
-    checkState(
-        envelope.getBeaconBlockRoot().equals(blockRoot),
-        "Blinded execution payload envelope block root %s does not match stored block root %s",
-        envelope.getBeaconBlockRoot(),
-        blockRoot);
+    checkEnvelopeBlockRoot(blockRoot, envelope);
     final ExecutionPayloadHeader payloadHeader = envelope.getMessage().getPayloadHeader();
     checkState(
         payloadHeader.getParentHash().equals(bid.getParentBlockHash()),

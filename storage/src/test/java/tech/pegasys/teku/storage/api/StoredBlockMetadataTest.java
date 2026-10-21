@@ -23,7 +23,9 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
@@ -73,5 +75,36 @@ class StoredBlockMetadataTest {
         .contains(
             new GloasForkChoiceRebuildData(
                 latestBid.getParentBlockHash(), latestBid.getBlockHash(), Optional.empty()));
+  }
+
+  @Test
+  void extractGloasForkChoiceRebuildData_shouldUseGenesisEnvelopePayload() {
+    final Spec spec = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final SignedBlockAndState blockAndState =
+        dataStructureUtil.randomSignedBlockAndState(UInt64.ZERO);
+    final ExecutionPayloadBid bid =
+        blockAndState
+            .getBlock()
+            .getMessage()
+            .getBody()
+            .getOptionalSignedExecutionPayloadBid()
+            .map(SignedExecutionPayloadBid::getMessage)
+            .orElseThrow();
+    final SignedBlindedExecutionPayloadEnvelope envelope =
+        dataStructureUtil
+            .randomSignedExecutionPayloadEnvelopeForBlock(blockAndState.getBlock())
+            .blind(spec);
+    final ExecutionPayloadHeader payloadHeader = envelope.getMessage().getPayloadHeader();
+
+    assertThat(
+            StoredBlockMetadata.extractGloasForkChoiceRebuildData(
+                blockAndState.getBlock(), Optional.of(envelope)))
+        .contains(
+            new GloasForkChoiceRebuildData(
+                bid.getParentBlockHash(),
+                payloadHeader.getBlockHash(),
+                Optional.of(payloadHeader.getBlockNumber()),
+                Optional.of(payloadHeader.getGasLimit())));
   }
 }
