@@ -51,20 +51,22 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadContext;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ExecutionPayloadStatus;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceUpdatedResult;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
 import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.protoarray.ForkChoiceStrategy;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
@@ -88,6 +90,8 @@ class ForkChoiceNotifierGloasHezeTest {
   private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(10_000);
   private final ExecutionLayerChannel executionLayerChannel = mock(ExecutionLayerChannel.class);
   private final InclusionListStore inclusionListStore = new InclusionListStore(4);
+  private final ProposerPreferencesManager proposerPreferencesManager =
+      mock(ProposerPreferencesManager.class);
 
   private Spec spec;
   private SpecMilestone specMilestone;
@@ -132,6 +136,7 @@ class ForkChoiceNotifierGloasHezeTest {
                 recentChainData,
                 Optional.of(dataStructureUtil.randomEth1Address()),
                 false,
+                proposerPreferencesManager,
                 inclusionListStore));
     notifier =
         new ForkChoiceNotifierImpl(
@@ -540,9 +545,26 @@ class ForkChoiceNotifierGloasHezeTest {
             .orElseThrow();
     final UInt64 proposerIndex = UInt64.valueOf(spec.getBeaconProposerIndex(state, slot));
     final Eth1Address feeRecipient = dataStructureUtil.randomEth1Address();
-    proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
-        List.of(new BeaconPreparableProposer(proposerIndex, feeRecipient)),
-        recentChainData.getHeadSlot());
+    // From Gloas, fee recipients come only from accepted signed proposer preferences
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(spec.atSlot(slot).getSchemaDefinitions());
+    final SignedProposerPreferences preferences =
+        schemaDefinitions
+            .getSignedProposerPreferencesSchema()
+            .create(
+                schemaDefinitions
+                    .getProposerPreferencesSchema()
+                    .create(
+                        dataStructureUtil.randomBytes32(),
+                        slot,
+                        proposerIndex,
+                        feeRecipient,
+                        dataStructureUtil.randomUInt64()),
+                dataStructureUtil.randomSignature());
+    when(proposerPreferencesManager.getProposerPreferences(eq(slot), any()))
+        .thenReturn(Optional.of(preferences.getMessage()));
+    proposersDataManager.updatePreparedProposersFromProposerPreferences(
+        List.of(preferences), recentChainData.getHeadSlot());
   }
 
   private PayloadBuildingAttributes calculateRealAttributes(final UInt64 slot) {
