@@ -382,14 +382,21 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
         .removeIf(
             tracker -> {
               final boolean isCleanupDue;
+              final boolean isDataAvailabilityDeferred =
+                  spec.atSlot(tracker.slot())
+                      .getForkChoiceUtil()
+                      .isDataAvailabilityCheckDeferredToExecutionPayloadEnvelope();
               if (tracker.slot().isLessThan(firstNonFinalizedSlot)) {
-                isCleanupDue = true;
+                // The latest finalized anchor may still be waiting for its execution payload
+                // envelope (e.g. a state-only checkpoint anchor whose payload is recovered after
+                // startup). Its DA check runs at the anchor block slot, which is always at or
+                // below the finalized epoch start, so keep that tracker alive until the payload
+                // is imported.
+                isCleanupDue =
+                    !(isDataAvailabilityDeferred
+                        && isLatestFinalizedAnchorAwaitingExecutionPayload(tracker.blockRoot()));
               } else {
                 final boolean blockImported = recentChainData.containsBlock(tracker.blockRoot());
-                final boolean isDataAvailabilityDeferred =
-                    spec.atSlot(tracker.slot())
-                        .getForkChoiceUtil()
-                        .isDataAvailabilityCheckDeferredToExecutionPayloadEnvelope();
                 isCleanupDue = blockImported && !isDataAvailabilityDeferred;
               }
 
@@ -411,6 +418,16 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
               }
               return false;
             });
+  }
+
+  private boolean isLatestFinalizedAnchorAwaitingExecutionPayload(final Bytes32 blockRoot) {
+    return recentChainData
+        .getLatestFinalized()
+        .filter(anchor -> anchor.getRoot().equals(blockRoot))
+        .map(
+            anchor ->
+                recentChainData.getStore().getExecutionPayloadIfAvailable(blockRoot).isEmpty())
+        .orElse(false);
   }
 
   @Override
