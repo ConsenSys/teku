@@ -150,7 +150,9 @@ class KvStoreDatabaseTest {
             Map.of(),
             Map.of());
 
-    assertThat(orphanedRoots).containsExactly(chainBuilder.getBlockAtSlot(2).getRoot());
+    // The genesis block is EMPTY too: the block at slot 1 builds on the EL genesis block
+    assertThat(orphanedRoots)
+        .containsExactlyInAnyOrder(genesis.getRoot(), chainBuilder.getBlockAtSlot(2).getRoot());
     // Each block of the chain, down to the parent of the oldest finalized block, is read once
     chainBuilder
         .streamBlocksAndStates(1, 4)

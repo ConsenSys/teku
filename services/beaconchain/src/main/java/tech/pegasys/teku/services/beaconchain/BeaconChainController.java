@@ -39,7 +39,6 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -714,6 +713,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 if (isUsingCustomInitialState()) {
                   STATUS_LOG.warnInitialStateIgnored();
                 }
+                wsInitializer.validateGloasGenesisAnchor(client.getStore().getLatestFinalized());
                 if (!isAllowSyncOutsideWeakSubjectivityPeriod()) {
                   validateWeakSubjectivityPeriod(client);
                 }
@@ -1593,7 +1593,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
       final PayloadAttestationMessageGossipValidator validator =
           new PayloadAttestationMessageGossipValidator(
-              spec, gossipValidationHelper, invalidBlockRoots);
+              spec, gossipValidationHelper, signatureVerificationService, invalidBlockRoots);
       pendingPayloadAttestations =
           poolFactory.createPendingPoolForPayloadAttestations(
               spec, beaconConfig.eth2NetworkConfig().getPendingPayloadAttestationsMaxQueue());
@@ -1776,15 +1776,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
             forkChoice,
             beaconConfig.eth2NetworkConfig().getAttestationWaitLimitMillis(),
             timeProvider);
-    // Only required for Gloas genesis, so skip it fast in all other cases
-    if (spec.getGenesisSpecConfig().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
-      try {
-        forkChoice.applyGenesisExecutionPayloadForGloas().get(1, TimeUnit.MINUTES);
-      } catch (Exception e) {
-        throw new InvalidConfigurationException(
-            "Failed to apply genesis execution payload for Gloas", e);
-      }
-    }
   }
 
   public void initMetrics() {

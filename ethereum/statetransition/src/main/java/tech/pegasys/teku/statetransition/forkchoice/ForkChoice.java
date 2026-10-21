@@ -30,9 +30,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
@@ -43,14 +41,12 @@ import tech.pegasys.teku.infrastructure.async.ExceptionThrowingRunnable;
 import tech.pegasys.teku.infrastructure.async.ExceptionThrowingSupplier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.eventthread.EventThread;
-import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.exceptions.FatalServiceFailureException;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.cache.CapturingIndexedAttestationCache;
 import tech.pegasys.teku.spec.cache.IndexedAttestationCache;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
@@ -61,7 +57,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
@@ -77,7 +72,6 @@ import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult;
 import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult.Status;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
@@ -941,76 +935,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     notifyForkChoiceUpdatedAndOptimisticSyncingChanged(Optional.empty(), Optional.empty());
 
     return result;
-  }
-
-  /**
-   * Apply the genesis execution payload envelope to the store. No-op for pre-Gloas genesis.
-   *
-   * <p>Gloas-and-later defines the chain head as a (block, payload) pair, so at genesis we seed a
-   * FULL fork-choice node by importing an envelope whose payload carries the genesis EL block hash.
-   * Without this, {@code internalGetPayloadId} sees a zero parent execution hash at slot 1 and
-   * erroneously falls into the pre-merge branch.
-   */
-  public SafeFuture<Void> applyGenesisExecutionPayloadForGloas() {
-    if (spec.getGenesisSpecConfig().getMilestone().isLessThan(SpecMilestone.GLOAS)) {
-      return SafeFuture.COMPLETE;
-    }
-    final SchemaDefinitionsGloas schemaDefinitions =
-        SchemaDefinitionsGloas.required(spec.getGenesisSpec().getSchemaDefinitions());
-    final BeaconStateGloas genesisState =
-        BeaconStateGloas.required(recentChainData.getStore().getLatestFinalized().getState());
-    final Bytes32 genesisExecutionBlockHash = genesisState.getLatestBlockHash();
-    final ExecutionPayload genesisPayload =
-        schemaDefinitions
-            .getExecutionPayloadSchema()
-            .createExecutionPayload(
-                builder ->
-                    builder
-                        .parentHash(Bytes32.ZERO)
-                        .feeRecipient(Bytes20.ZERO)
-                        .stateRoot(Bytes32.ZERO)
-                        .receiptsRoot(Bytes32.ZERO)
-                        .logsBloom(Bytes.wrap(new byte[256]))
-                        .prevRandao(Bytes32.ZERO)
-                        .blockNumber(UInt64.ZERO)
-                        .gasLimit(UInt64.ZERO)
-                        .gasUsed(UInt64.ZERO)
-                        .timestamp(UInt64.ZERO)
-                        .extraData(Bytes.EMPTY)
-                        .baseFeePerGas(UInt256.ZERO)
-                        .blockHash(genesisExecutionBlockHash)
-                        .transactions(List.of())
-                        .withdrawals(List::of)
-                        .blobGasUsed(() -> UInt64.ZERO)
-                        .excessBlobGas(() -> UInt64.ZERO)
-                        .blockAccessList(() -> Bytes.EMPTY)
-                        .slotNumber(() -> UInt64.ZERO));
-    final SignedExecutionPayloadEnvelope envelope =
-        schemaDefinitions
-            .getSignedExecutionPayloadEnvelopeSchema()
-            .create(
-                schemaDefinitions
-                    .getExecutionPayloadEnvelopeSchema()
-                    .create(
-                        genesisPayload,
-                        schemaDefinitions.getExecutionRequestsSchema().getDefault(),
-                        UInt64.ZERO,
-                        recentChainData.getBestBlockRoot().orElseThrow(),
-                        Bytes32.ZERO),
-                BLSSignature.empty());
-
-    return onForkChoiceThread(
-        () -> {
-          final ForkChoiceUtil forkChoiceUtil = spec.getGenesisSpec().getForkChoiceUtil();
-          final StoreTransaction transaction = recentChainData.startStoreTransaction();
-          forkChoiceUtil.applyExecutionPayloadToStore(transaction, envelope, false);
-          // Note: not using thenRun here because we want to ensure each step is on the event thread
-          transaction.commit().join();
-
-          final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-          updateForkChoiceForImportedExecutionPayload(forkChoiceStrategy);
-          notifyForkChoiceUpdatedAndOptimisticSyncingChanged(Optional.empty(), Optional.empty());
-        });
   }
 
   // from consensus-specs/fork-choice:
