@@ -14,6 +14,7 @@
 package tech.pegasys.teku.beaconrestapi.v1.beacon;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.http.ContentTypes.OCTET_STREAM;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
@@ -22,6 +23,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONS
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
+import java.util.stream.Stream;
 import okhttp3.Response;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
@@ -34,44 +36,50 @@ import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class GetStateBuilderPendingPaymentsIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 
   @Test
-  public void shouldGetBuilderPendingPaymentsJsonAndSsz() throws Exception {
-    startRestAPIAtGenesis(SpecMilestone.GLOAS);
-    createBlocksAtSlots(10);
+  public void shouldGetBuilderPendingPaymentsJson() throws Exception {
+    startRestAPIAtGenesis(SpecMilestone.GLOAS, this::withBuilderPendingPayments);
+    final SszVector<BuilderPendingPayment> expected = getHeadStateBuilderPendingPayments();
+    assertThat(expected).hasSize(2 * spec.getGenesisSpecConfig().getSlotsPerEpoch());
+    assertThat(expected).doesNotContain(expected.getSchema().getElementSchema().getDefault());
 
-    final Response jsonResponse = get("head");
+    try (final Response response = get("head")) {
+      assertThat(response.code()).isEqualTo(SC_OK);
+      assertThat(response.header(HEADER_CONSENSUS_VERSION))
+          .isEqualTo(SpecMilestone.GLOAS.lowerCaseName());
+      final JsonNode node = JsonTestUtil.parseAsJsonNode(response.body().string());
+      assertThat(node.get("version").asText()).isEqualTo("gloas");
+      assertThat(node.get("execution_optimistic").isBoolean()).isTrue();
+      assertThat(node.get("finalized").isBoolean()).isTrue();
+      assertThat(
+              JsonUtil.parse(
+                  node.get("data").toString(), expected.getSchema().getJsonTypeDefinition()))
+          .isEqualTo(expected);
+    }
+  }
 
-    assertThat(jsonResponse.code()).isEqualTo(SC_OK);
-    assertThat(jsonResponse.header(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(SpecMilestone.GLOAS.lowerCaseName());
-    final JsonNode node = JsonTestUtil.parseAsJsonNode(jsonResponse.body().string());
-    assertThat(node.get("version").asText()).isEqualTo("gloas");
-    assertThat(node.get("execution_optimistic").asBoolean()).isFalse();
-    assertThat(node.get("finalized").asBoolean()).isFalse();
-    assertThat(node.get("data").size())
-        .isEqualTo(2 * spec.getGenesisSpecConfig().getSlotsPerEpoch());
+  @Test
+  public void shouldGetBuilderPendingPaymentsSsz() throws Exception {
+    startRestAPIAtGenesis(SpecMilestone.GLOAS, this::withBuilderPendingPayments);
+    final SszVector<BuilderPendingPayment> expected = getHeadStateBuilderPendingPayments();
+    assertThat(expected).doesNotContain(expected.getSchema().getElementSchema().getDefault());
 
-    final SszVectorSchema<BuilderPendingPayment, ?> schema =
-        SchemaDefinitionsGloas.required(
-                spec.forMilestone(SpecMilestone.GLOAS).getSchemaDefinitions())
-            .getBuilderPendingPaymentsSchema();
-    final SszVector<BuilderPendingPayment> jsonPayments =
-        JsonUtil.parse(node.get("data").toString(), schema.getJsonTypeDefinition());
-
-    final Response sszResponse =
+    try (final Response response =
         getResponse(
-            GetStateBuilderPendingPayments.ROUTE.replace("{state_id}", "head"), OCTET_STREAM);
-
-    assertThat(sszResponse.code()).isEqualTo(SC_OK);
-    assertThat(sszResponse.header(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(SpecMilestone.GLOAS.lowerCaseName());
-    assertThat(Bytes.wrap(sszResponse.body().bytes())).isEqualTo(jsonPayments.sszSerialize());
+            GetStateBuilderPendingPayments.ROUTE.replace("{state_id}", "head"), OCTET_STREAM)) {
+      assertThat(response.code()).isEqualTo(SC_OK);
+      assertThat(response.header(HEADER_CONSENSUS_VERSION))
+          .isEqualTo(SpecMilestone.GLOAS.lowerCaseName());
+      assertThat(Bytes.wrap(response.body().bytes())).isEqualTo(expected.sszSerialize());
+    }
   }
 
   @Test
@@ -79,11 +87,11 @@ public class GetStateBuilderPendingPaymentsIntegrationTest
     startRestAPIAtGenesis(TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.valueOf(10)));
     createBlocksAtSlots(10);
 
-    final Response response = get("head");
-
-    assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
-    assertThat(response.body().string())
-        .contains("prior to GLOAS and does not contain builder pending payments");
+    try (final Response response = get("head")) {
+      assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
+      assertThat(response.body().string())
+          .contains("prior to GLOAS and does not contain builder pending payments");
+    }
   }
 
   @Test
@@ -97,5 +105,23 @@ public class GetStateBuilderPendingPaymentsIntegrationTest
 
   public Response get(final String stateId) throws IOException {
     return getResponse(GetStateBuilderPendingPayments.ROUTE.replace("{state_id}", stateId));
+  }
+
+  private BeaconState withBuilderPendingPayments(final BeaconState state) {
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final BeaconStateGloas gloasState = BeaconStateGloas.required(state);
+    final SszVectorSchema<BuilderPendingPayment, ?> schema =
+        gloasState.getBuilderPendingPayments().getSchema();
+    final SszVector<BuilderPendingPayment> payments =
+        schema.createFromElements(
+            Stream.generate(dataStructureUtil::randomBuilderPendingPayment)
+                .limit(schema.getLength())
+                .toList());
+    return gloasState.updatedGloas(mutable -> mutable.setBuilderPendingPayments(payments));
+  }
+
+  private SszVector<BuilderPendingPayment> getHeadStateBuilderPendingPayments() {
+    return BeaconStateGloas.required(safeJoin(recentChainData.getBestState().orElseThrow()))
+        .getBuilderPendingPayments();
   }
 }

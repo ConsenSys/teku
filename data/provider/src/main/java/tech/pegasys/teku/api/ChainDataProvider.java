@@ -1173,16 +1173,9 @@ public class ChainDataProvider {
         maybeStateAndMetadata, SpecMilestone.GLOAS, "builder pending withdrawals");
 
     return maybeStateAndMetadata.map(
-        stateAndMetaData -> {
-          final SszList<BuilderPendingWithdrawal> withdrawals =
-              BeaconStateGloas.required(stateAndMetaData.getData()).getBuilderPendingWithdrawals();
-          return new ObjectAndMetaData<>(
-              withdrawals,
-              stateAndMetaData.getMilestone(),
-              stateAndMetaData.isExecutionOptimistic(),
-              stateAndMetaData.isCanonical(),
-              stateAndMetaData.isFinalized());
-        });
+        stateAndMetaData ->
+            stateAndMetaData.map(
+                state -> BeaconStateGloas.required(state).getBuilderPendingWithdrawals()));
   }
 
   Optional<ObjectAndMetaData<SszVector<BuilderPendingPayment>>> getBuilderPendingPayments(
@@ -1190,16 +1183,9 @@ public class ChainDataProvider {
     checkMinimumMilestone(maybeStateAndMetadata, SpecMilestone.GLOAS, "builder pending payments");
 
     return maybeStateAndMetadata.map(
-        stateAndMetaData -> {
-          final SszVector<BuilderPendingPayment> payments =
-              BeaconStateGloas.required(stateAndMetaData.getData()).getBuilderPendingPayments();
-          return new ObjectAndMetaData<>(
-              payments,
-              stateAndMetaData.getMilestone(),
-              stateAndMetaData.isExecutionOptimistic(),
-              stateAndMetaData.isCanonical(),
-              stateAndMetaData.isFinalized());
-        });
+        stateAndMetaData ->
+            stateAndMetaData.map(
+                state -> BeaconStateGloas.required(state).getBuilderPendingPayments()));
   }
 
   void checkMinimumMilestone(

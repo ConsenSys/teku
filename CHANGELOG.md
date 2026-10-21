@@ -13,7 +13,7 @@
  - Updated discovery library to 26.10.1, which speeds up secp256k1 operations used by node discovery. [#11541](https://github.com/Consensys-Incorporated/teku/pull/11541)
  - Gossip signature verification now gathers larger batches and verifies signatures over the same message together, lowering CPU usage at the cost of up to ~10 ms added gossip validation latency. Use `--Xp2p-batch-verify-signatures-mode=LEGACY` to restore the previous batching behaviour. In both modes, signatures re-verified after a failed batch now honour `--Xp2p-batch-verify-signatures-strict-thread-limit-enabled` and a task that throws no longer fails the rest of its batch.
  - Payload attestation message signatures are now verified in batches by the gossip signature verification service, off the gossip thread, instead of one at a time.
- - Added the Gloas beacon API endpoints `GET /eth/v1/beacon/states/{state_id}/builder_pending_withdrawals` and `GET /eth/v1/beacon/states/{state_id}/builder_pending_payments`.
+ - Added the Gloas beacon API endpoints `GET /eth/v1/beacon/states/{state_id}/builder_pending_withdrawals` and `GET /eth/v1/beacon/states/{state_id}/builder_pending_payments`. [#11544](https://github.com/Consensys-Incorporated/teku/pull/11544)
 
 ### Bug Fixes
  - The fee recipient of a Gloas block now comes from signed proposer preferences, so preferences that fail validation no longer change where the block pays, and `prepare_beacon_proposer` is ignored once Gloas is active. [#11518](https://github.com/Consensys-Incorporated/teku/issues/11518)
