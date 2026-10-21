@@ -15,6 +15,7 @@ package tech.pegasys.teku.networking.p2p.libp2p.gossip;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.common.primitives.Ints;
 import io.libp2p.pubsub.FastIdSeenCache;
 import io.libp2p.pubsub.PubsubMessage;
 import java.util.Arrays;
@@ -44,13 +45,17 @@ import java.util.HexFormat;
  *
  * <p>Safety: the key only carries the digest; collision resistance comes from SHA-256 itself, so
  * two messages with different wire bytes get different keys exactly as before. The warning on
- * {@link PubsubMessage#hashCode()} about keeping {@code HashMap} keys collision free still holds
- * and is still met, because a {@code hashCode()} collision requires the first four digest bytes to
- * match, which a remote peer can only cause by brute force, and even then the full digest still
- * distinguishes the entries. Keys are also {@link Comparable} (unsigned lexicographic order of the
- * digest) so that a {@code HashMap} bin which treeifies under such collisions keeps logarithmic
- * lookups instead of scanning the whole bin. The array is wrapped without copying and must not be
- * modified by the caller.
+ * {@link PubsubMessage#hashCode()} about keeping {@code HashMap} keys collision free is about
+ * denial of service, and a 32-bit {@code hashCode()} cannot meet it on its own: a full collision
+ * costs about 2^32 SHA-256 evaluations, and landing in the same {@code HashMap} bucket only needs
+ * the low bits of the spread hash to match, about 22 bits for a table of a few million entries,
+ * which is cheap to brute force per message. The defence is {@code HashMap}'s treeification of long
+ * bins, which only orders keys whose runtime class directly implements {@code Comparable<Self>}.
+ * This class does ({@link #compareTo(FastMessageId)}, unsigned lexicographic order of the digest),
+ * so a bin flooded with same-hash keys keeps logarithmic lookups instead of scanning every key; the
+ * tuweni wrapper it replaces never qualified, because its concrete class only inherits {@code
+ * Comparable<Bytes>}. Do not drop {@link Comparable} on the grounds that the digest is collision
+ * resistant. The array is wrapped without copying and must not be modified by the caller.
  */
 final class FastMessageId implements Comparable<FastMessageId> {
 
@@ -71,11 +76,7 @@ final class FastMessageId implements Comparable<FastMessageId> {
         DIGEST_LENGTH,
         digest.length);
     this.digest = digest;
-    this.hashCode =
-        ((digest[0] & 0xff) << 24)
-            | ((digest[1] & 0xff) << 16)
-            | ((digest[2] & 0xff) << 8)
-            | (digest[3] & 0xff);
+    this.hashCode = Ints.fromByteArray(digest);
   }
 
   static FastMessageId of(final PubsubMessage message) {

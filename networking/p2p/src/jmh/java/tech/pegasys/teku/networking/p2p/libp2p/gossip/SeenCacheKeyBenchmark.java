@@ -38,6 +38,7 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.infra.BenchmarkParams;
 import pubsub.pb.Rpc;
 
 /**
@@ -87,16 +88,23 @@ public class SeenCacheKeyBenchmark {
   private int index;
 
   @Setup(Level.Trial)
-  public void setUp() {
+  public void setUp(final BenchmarkParams params) {
     final Random random = new Random(1234);
     final byte[][] digests = new byte[size][];
-    seenCache = new FastIdSeenCache<>(keyType.fastIdFunction::apply);
-    rawMap = new HashMap<>();
+    // fill only the structure the benchmark method probes, so the other one does not sit in the
+    // live heap of every measurement
+    final boolean rawMapBenchmark =
+        params.getBenchmark().endsWith("rawMapHit") || params.getBenchmark().endsWith("rawMapMiss");
+    seenCache = rawMapBenchmark ? null : new FastIdSeenCache<>(keyType.fastIdFunction::apply);
+    rawMap = rawMapBenchmark ? new HashMap<>() : null;
     for (int i = 0; i < size; i++) {
       digests[i] = randomBytes(random, FastMessageId.DIGEST_LENGTH);
       final PubsubMessage message = new DigestOnlyMessage(digests[i], randomBytes(random, 20));
-      seenCache.put(message, Optional.of(ValidationResult.Valid));
-      rawMap.put(keyType.fastIdFunction.apply(message), message);
+      if (rawMapBenchmark) {
+        rawMap.put(keyType.fastIdFunction.apply(message), message);
+      } else {
+        seenCache.put(message, Optional.of(ValidationResult.Valid));
+      }
     }
     hits = new PubsubMessage[LOOKUPS];
     misses = new PubsubMessage[LOOKUPS];

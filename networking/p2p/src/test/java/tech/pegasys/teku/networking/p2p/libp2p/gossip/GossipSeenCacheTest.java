@@ -16,7 +16,6 @@ package tech.pegasys.teku.networking.p2p.libp2p.gossip;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static tech.pegasys.teku.infrastructure.async.Waiter.ensureConditionRemainsMet;
 import static tech.pegasys.teku.infrastructure.async.Waiter.waitFor;
 
 import com.google.protobuf.ByteString;
@@ -117,7 +116,9 @@ class GossipSeenCacheTest {
 
     receive(message(Bytes.fromHexString("0x0102030406")));
     waitFor(() -> assertThat(listener.unseen).hasSize(2));
-    ensureConditionRemainsMet(() -> assertThat(listener.seen).isEmpty());
+    // every message is reported as either seen or unseen when its RPC is processed, so once both
+    // unseen notifications are in nothing can still mark one of them as seen
+    assertThat(listener.seen).isEmpty();
   }
 
   private static Rpc.Message message(final Bytes payload) {
