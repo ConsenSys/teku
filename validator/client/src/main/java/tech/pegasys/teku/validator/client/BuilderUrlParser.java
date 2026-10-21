@@ -43,7 +43,7 @@ public class BuilderUrlParser {
         AuthDataResolver.resolveDefaultAuthData(parsedBuilderUrl);
       } catch (Exception e) {
         throw new InvalidConfigurationException(
-            "Invalid configuration. Cannot resolve the default auth_data for " + builderUrl, e);
+            "Invalid configuration. Cannot resolve the default auth data for " + builderUrl, e);
       }
       return parsedBuilderUrl;
     } catch (IllegalArgumentException | MalformedURLException e) {
