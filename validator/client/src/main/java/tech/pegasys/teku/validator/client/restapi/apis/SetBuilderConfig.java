@@ -45,9 +45,17 @@ public class SetBuilderConfig extends RestApiEndpoint {
             .pathParam(PARAM_PUBKEY_TYPE)
             .description(
                 """
-                    Set the builder configuration for an individual validator public key.
-                    The submission replaces the key's stored configuration in full.
-                    Each entry in the `builders` array must contain a `url`, and no two entries may share it.
+                    Set the builder configuration for an individual validator public key. The submission replaces
+                    the key's stored configuration in full; the server MUST NOT merge it with what was stored
+                    before.
+
+                    Each entry in the `builders` array MUST contain a `url`, and no two entries may share both
+                    their `url` and their `auth_data`. The server MUST reject a submission that violates either
+                    rule with a 400 rather than storing a partial list or silently dropping an entry.
+
+                    A `POST` body of `{}` stores a configuration with no overrides, which resolves identically to
+                    having none, so it is behaviorally equivalent to `DELETE`. An empty `builders` array is a
+                    configuration that names no builders, not a removal.
                     """)
             .requestBodyType(BUILDER_CONFIG_TYPE)
             .response(SC_ACCEPTED, "Success")

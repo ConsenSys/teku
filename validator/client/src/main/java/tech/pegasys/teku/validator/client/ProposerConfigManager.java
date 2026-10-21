@@ -15,6 +15,8 @@ package tech.pegasys.teku.validator.client;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,11 +25,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.ProposerConfig.BuilderConfig;
@@ -57,6 +62,10 @@ public class ProposerConfigManager
       new AtomicReference<>(Optional.empty());
   // keeps the "configured gas limit is above the recommended one" warning to one per validator
   private final Map<BLSPublicKey, UInt64> warnedGasLimitByPublicKey = new ConcurrentHashMap<>();
+
+  // caching the default auth data by host to avoid recomputing it
+  private final LRUCache<String, Bytes> cachedDefaultAuthDataByHost =
+      LRUCache.create((int) BuilderConfigSchema.MAX_BUILDER_ENTRIES);
 
   private Optional<OwnedValidators> ownedValidators = Optional.empty();
 
@@ -311,7 +320,9 @@ public class ProposerConfigManager
                             builder ->
                                 new ResolvedBuilderEntry(
                                     builder.getUrl(),
-                                    builder.getAuthData(),
+                                    builder
+                                        .getAuthData()
+                                        .orElse(getDefaultAuthData(builder.getUrl())),
                                     builder.getBuilderPubkeys().orElse(List.of()),
                                     builder
                                         .getMaxExecutionPayment()
@@ -326,13 +337,22 @@ public class ProposerConfigManager
                             url ->
                                 new ResolvedBuilderEntry(
                                     url,
-                                    Optional.empty(),
+                                    getDefaultAuthData(url),
                                     List.of(),
                                     config.getBuilderMaxExecutionPayment(),
                                     minBid,
                                     builderBoostFactor))
                         .toList());
     return new ResolvedBuilderConfig(minBid, builderBoostFactor, resolvedBuilders);
+  }
+
+  private Bytes getDefaultAuthData(final URL builderUrl) {
+    return cachedDefaultAuthDataByHost.get(
+        builderUrl.getHost(),
+        __ ->
+            Bytes.of(
+                AuthDataResolver.resolveDefaultAuthData(builderUrl)
+                    .getBytes(StandardCharsets.US_ASCII)));
   }
 
   @Override

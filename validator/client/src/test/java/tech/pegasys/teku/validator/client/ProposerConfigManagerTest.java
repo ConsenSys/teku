@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -89,6 +90,7 @@ public class ProposerConfigManagerTest {
   private UInt64 cliBuilderBoostFactor;
   private UInt64 cliBuilderMaxExecutionPayment;
   private URL cliBuilderUrl;
+  ;
 
   private final ValidatorConfig validatorConfig = mock(ValidatorConfig.class);
   private final ProposerConfigProvider proposerConfigProvider = mock(ProposerConfigProvider.class);
@@ -324,7 +326,7 @@ public class ProposerConfigManagerTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         cliBuilderUrl,
-                        Optional.empty(),
+                        expectedAuthData(cliBuilderUrl),
                         List.of(),
                         cliBuilderMaxExecutionPayment,
                         cliBuilderMinBid,
@@ -361,7 +363,7 @@ public class ProposerConfigManagerTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.empty(),
+                        expectedAuthData(BUILDER_URL),
                         List.of(),
                         cliBuilderMaxExecutionPayment,
                         keyMinBid,
@@ -391,7 +393,7 @@ public class ProposerConfigManagerTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.empty(),
+                        expectedAuthData(BUILDER_URL),
                         List.of(),
                         cliBuilderMaxExecutionPayment,
                         runtimeBuilderMinBid,
@@ -960,7 +962,7 @@ public class ProposerConfigManagerTest {
   private static ResolvedBuilderEntry expectedBuilderEntry(final BuilderEntry builder) {
     return new ResolvedBuilderEntry(
         builder.getUrl(),
-        builder.getAuthData(),
+        builder.getAuthData().orElseThrow(),
         builder.getBuilderPubkeys().orElseThrow(),
         builder.getMaxExecutionPayment().orElseThrow(),
         builder.getMinBid().orElseThrow(),
@@ -1006,6 +1008,15 @@ public class ProposerConfigManagerTest {
     assertThat(proposerConfigManager.isReadyToProvideProperties()).isFalse();
     assertThat(proposerConfigManager.initialize(ownedValidators)).isCompleted();
     assertThat(proposerConfigManager.isReadyToProvideProperties()).isTrue();
+  }
+
+  private Bytes expectedAuthData(final String url) throws IOException {
+    return expectedAuthData(URI.create(url).toURL());
+  }
+
+  private Bytes expectedAuthData(final URL url) {
+    return Bytes.of(
+        AuthDataResolver.resolveDefaultAuthData(url).getBytes(StandardCharsets.US_ASCII));
   }
 
   enum Properties {

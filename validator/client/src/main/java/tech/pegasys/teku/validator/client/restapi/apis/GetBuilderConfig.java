@@ -87,7 +87,7 @@ public class GetBuilderConfig extends RestApiEndpoint {
                         resolvedBuilderEntry ->
                             new BuilderEntry(
                                 resolvedBuilderEntry.url().toExternalForm(),
-                                resolvedBuilderEntry.authData(),
+                                Optional.of(resolvedBuilderEntry.authData()),
                                 Optional.of(resolvedBuilderEntry.builderPubkeys()),
                                 Optional.of(resolvedBuilderEntry.maxExecutionPayment()),
                                 Optional.of(resolvedBuilderEntry.minBid()),

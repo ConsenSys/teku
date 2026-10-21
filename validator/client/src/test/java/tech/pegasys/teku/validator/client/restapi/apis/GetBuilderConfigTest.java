@@ -82,7 +82,7 @@ public class GetBuilderConfigTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.of(authData),
+                        authData,
                         builderPubkeys,
                         UInt64.valueOf(3),
                         UInt64.valueOf(2),
