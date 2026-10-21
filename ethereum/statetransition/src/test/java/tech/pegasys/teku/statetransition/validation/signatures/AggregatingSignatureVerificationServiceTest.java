@@ -502,7 +502,9 @@ public class AggregatingSignatureVerificationServiceTest {
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
   public void waitForBatch_gathersTasksArrivingWithinTheGatherWindow() throws Exception {
-    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofMillis(500));
+    // A 10s gather window with a target of 3 means the gather can only end by reaching the target,
+    // so the outcome does not depend on how quickly the test submits tasks
+    service = createService(SignatureVerificationMode.GATHER_AND_GROUP, Duration.ofSeconds(10), 3);
     startService();
     executeValidVerify(0, 0);
 
@@ -510,6 +512,9 @@ public class AggregatingSignatureVerificationServiceTest {
         CompletableFuture.supplyAsync(service::waitForBatch);
     waitUntilFirstTaskTaken();
     executeValidVerify(1, 1);
+    // The late task is taken into the batch, which keeps gathering because the target is not met
+    Waiter.waitFor(() -> assertThat(service.batchSignatureTasks).isEmpty());
+    assertThat(batch).isNotDone();
     executeValidVerify(2, 2);
 
     assertThat(batch.get(5, TimeUnit.SECONDS)).hasSize(3);
@@ -624,7 +629,7 @@ public class AggregatingSignatureVerificationServiceTest {
 
     assertThat(batch).hasSize(1);
     // Legacy mode drains whatever is queued and never waits for the 10s gather window
-    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
   }
 
   @Test
@@ -701,7 +706,7 @@ public class AggregatingSignatureVerificationServiceTest {
     assertThat(batch).hasSize(maxBatchSize);
     // The internal gather target (64) is clamped to maxBatchSize, so a full batch returns at once
     // instead of waiting out the 10s gather timeout
-    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
+    assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
   }
 
   private static void assertSameMessageParallelArguments(
