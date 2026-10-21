@@ -102,6 +102,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProce
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
 import tech.pegasys.teku.spec.schemas.api.StateValidatorBalanceData;
+import tech.pegasys.teku.statetransition.lightclient.LightClientBootstrapProvider;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.storage.client.BlobReconstructionProvider;
 import tech.pegasys.teku.storage.client.BlobSidecarReconstructionProvider;
@@ -122,6 +123,7 @@ public class ChainDataProvider {
   private final RecentChainData recentChainData;
   private final RewardCalculator rewardCalculator;
   private final LightClientUpdateStore lightClientUpdateStore;
+  private final LightClientBootstrapProvider lightClientBootstrapProvider;
 
   public ChainDataProvider(
       final Spec spec,
@@ -170,6 +172,8 @@ public class ChainDataProvider {
     this.executionPayloadSelectorFactory = executionPayloadSelectorFactory;
     this.rewardCalculator = rewardCalculator;
     this.lightClientUpdateStore = lightClientUpdateStore;
+    this.lightClientBootstrapProvider =
+        new LightClientBootstrapProvider(spec, combinedChainDataClient);
   }
 
   public List<LightClientUpdateWithContext> getBestLightClientUpdates(
@@ -789,23 +793,19 @@ public class ChainDataProvider {
 
   public SafeFuture<Optional<ObjectAndMetaData<LightClientBootstrap>>> getLightClientBoostrap(
       final Bytes32 blockRootParam) {
-    return stateSelectorFactory
-        .blockRootSelector(blockRootParam)
-        .getState()
-        .thenCombine(
-            combinedChainDataClient.getBlockByBlockRoot(blockRootParam),
-            (maybeStateData, maybeBlock) ->
-                maybeStateData.flatMap(
-                    stateData ->
-                        maybeBlock.flatMap(block -> getLightClientBootstrap(stateData, block))));
-  }
-
-  private Optional<ObjectAndMetaData<LightClientBootstrap>> getLightClientBootstrap(
-      final StateAndMetaData stateAndMetaData, final SignedBeaconBlock block) {
-    return spec.getLightClientUtil(stateAndMetaData.getData().getSlot())
-        .map(
-            clientUtil ->
-                stateAndMetaData.map(state -> clientUtil.createLightClientBootstrap(state, block)));
+    return lightClientBootstrapProvider
+        .getLightClientBootstrap(blockRootParam)
+        .thenApply(
+            maybeBootstrap ->
+                maybeBootstrap.map(
+                    bootstrap ->
+                        new ObjectAndMetaData<>(
+                            bootstrap,
+                            spec.atSlot(bootstrap.getLightClientHeader().getBeacon().getSlot())
+                                .getMilestone(),
+                            combinedChainDataClient.isOptimisticBlock(blockRootParam),
+                            true,
+                            true)));
   }
 
   public SafeFuture<Optional<ObjectAndMetaData<StateSyncCommitteesData>>> getStateSyncCommittees(

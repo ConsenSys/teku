@@ -811,6 +811,10 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
         .thenReturn(completedFuture(Optional.of(internalState)));
     when(mockCombinedChainDataClient.getBlockByBlockRoot(eq(block.getRoot())))
         .thenReturn(completedFuture(Optional.of(block)));
+    when(mockCombinedChainDataClient.getRecentChainData()).thenReturn(recentChainData);
+    when(mockCombinedChainDataClient.isFinalizedEpoch(ONE)).thenReturn(true);
+    when(mockCombinedChainDataClient.getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(ONE)))
+        .thenReturn(completedFuture(Optional.of(block)));
 
     final SafeFuture<Optional<ObjectAndMetaData<LightClientBootstrap>>> future =
         provider.getLightClientBoostrap(block.getRoot());
