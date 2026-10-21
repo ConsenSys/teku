@@ -322,7 +322,7 @@ public class ProposerConfigManager
                                     builder.getUrl(),
                                     builder
                                         .getAuthData()
-                                        .orElse(getDefaultAuthData(builder.getUrl())),
+                                        .orElseGet(() -> getDefaultAuthData(builder.getUrl())),
                                     builder.getBuilderPubkeys().orElse(List.of()),
                                     builder
                                         .getMaxExecutionPayment()
