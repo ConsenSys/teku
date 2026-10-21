@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition.execution;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -82,8 +83,8 @@ public class DefaultProposerPreferencesManager
         .map(SignedProposerPreferences::getMessage);
   }
 
-  @Override
-  public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
+  @VisibleForTesting
+  Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
     return getSignedProposerPreferences(Optional.of(slot), Optional.empty()).stream()
         .map(SignedProposerPreferences::getMessage)
         .toList();

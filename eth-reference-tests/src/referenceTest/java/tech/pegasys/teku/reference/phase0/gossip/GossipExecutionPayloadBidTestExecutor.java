@@ -23,7 +23,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -269,13 +268,6 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
               final UInt64 slot, final Bytes32 dependentRoot) {
             return Optional.ofNullable(acceptedPreferences.get(slot))
                 .map(preferencesByDependentRoot -> preferencesByDependentRoot.get(dependentRoot));
-          }
-
-          @Override
-          public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
-            return Optional.ofNullable(acceptedPreferences.get(slot))
-                .map(preferencesByDependentRoot -> List.copyOf(preferencesByDependentRoot.values()))
-                .orElse(List.of());
           }
 
           @Override

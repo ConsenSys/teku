@@ -32,6 +32,7 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.NodeDataProvider;
+import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.ParameterMetadata;
@@ -62,6 +63,7 @@ public class GetProposerPreferences extends RestApiEndpoint {
               "Only return signed proposer preferences with this dependent root."));
 
   private final NodeDataProvider nodeDataProvider;
+  private final SchemaDefinitionCache schemaDefinitionCache;
 
   public GetProposerPreferences(
       final DataProvider dataProvider, final SchemaDefinitionCache schemaDefinitionCache) {
@@ -72,12 +74,18 @@ public class GetProposerPreferences extends RestApiEndpoint {
       final NodeDataProvider provider, final SchemaDefinitionCache schemaDefinitionCache) {
     super(createMetadata(schemaDefinitionCache));
     this.nodeDataProvider = provider;
+    this.schemaDefinitionCache = schemaDefinitionCache;
   }
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
     request.header(Header.CACHE_CONTROL, CACHE_NONE);
     final Optional<UInt64> slot = request.getOptionalQueryParameter(PROPOSAL_SLOT_PARAMETER);
+    if (slot.isPresent()
+        && schemaDefinitionCache.milestoneAtSlot(slot.get()).isLessThan(SpecMilestone.GLOAS)) {
+      throw new BadRequestException(
+          "Cannot request proposer preferences for slots prior to gloas fork.");
+    }
     final Optional<Bytes32> dependentRoot =
         request.getOptionalQueryParameter(DEPENDENT_ROOT_PARAMETER);
     final ObjectAndMetaData<List<SignedProposerPreferences>> proposerPreferencesAndMetaData =

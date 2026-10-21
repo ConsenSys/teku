@@ -32,16 +32,23 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 class GetProposerPreferencesTest extends AbstractMigratedBeaconHandlerTest {
+  private static final Spec SPEC_WITH_LATER_GLOAS_FORK =
+      TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.ONE);
+  private static final UInt64 GLOAS_FORK_SLOT =
+      SPEC_WITH_LATER_GLOAS_FORK.computeStartSlotAtEpoch(UInt64.ONE);
 
   @BeforeEach
   void setUp() {
@@ -77,6 +84,34 @@ class GetProposerPreferencesTest extends AbstractMigratedBeaconHandlerTest {
         .thenReturn(responseWithMetaData);
 
     handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_OK);
+    assertThat(request.getResponseBody()).isEqualTo(responseWithMetaData);
+  }
+
+  @Test
+  void shouldReturnBadRequestForSlotPriorToGloasWithoutQueryingProvider() {
+    final GetProposerPreferences handlerWithLaterGloasFork = createHandlerWithLaterGloasFork();
+    request.setOptionalQueryParameter("slot", GLOAS_FORK_SLOT.minus(1).toString());
+
+    assertThatThrownBy(() -> handlerWithLaterGloasFork.handleRequest(request))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessage("Cannot request proposer preferences for slots prior to gloas fork.");
+    verifyNoInteractions(nodeDataProvider);
+    assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION)).isNull();
+  }
+
+  @Test
+  void shouldReturnProposerPreferencesForGloasForkSlot() throws JsonProcessingException {
+    final GetProposerPreferences handlerWithLaterGloasFork = createHandlerWithLaterGloasFork();
+    final UInt64 slot = GLOAS_FORK_SLOT;
+    final ObjectAndMetaData<List<SignedProposerPreferences>> responseWithMetaData =
+        createResponse();
+    request.setOptionalQueryParameter("slot", slot.toString());
+    when(nodeDataProvider.getProposerPreferencesAndMetaData(Optional.of(slot), Optional.empty()))
+        .thenReturn(responseWithMetaData);
+
+    handlerWithLaterGloasFork.handleRequest(request);
 
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
     assertThat(request.getResponseBody()).isEqualTo(responseWithMetaData);
@@ -125,6 +160,11 @@ class GetProposerPreferencesTest extends AbstractMigratedBeaconHandlerTest {
                 .getSignedProposerPreferencesSchema());
     assertThat(listSchema.sszDeserialize(Bytes.of(data)).asList())
         .containsExactlyElementsOf(responseWithMetaData.getData());
+  }
+
+  private GetProposerPreferences createHandlerWithLaterGloasFork() {
+    return new GetProposerPreferences(
+        nodeDataProvider, new SchemaDefinitionCache(SPEC_WITH_LATER_GLOAS_FORK));
   }
 
   private ObjectAndMetaData<List<SignedProposerPreferences>> createResponse() {
