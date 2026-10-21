@@ -25,7 +25,6 @@ import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 
 import java.net.MalformedURLException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
@@ -115,10 +114,8 @@ class DefaultBuilderConfigProviderTest {
                         builderMinBid,
                         builderBoostFactor))));
 
-    // no auth data configured, so it is derived from the builder url
     final BuilderRequestAuth expectedAuth =
-        ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(
-            Bytes.of("builder.example.com".getBytes(StandardCharsets.US_ASCII)), SLOT);
+        ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(authData, SLOT);
     when(signer.signBuilderRequestAuth(expectedAuth)).thenReturn(completedFuture(signature));
 
     final Optional<BuilderConfig> result = provider.getBuilderConfig(validator, SLOT).join();
