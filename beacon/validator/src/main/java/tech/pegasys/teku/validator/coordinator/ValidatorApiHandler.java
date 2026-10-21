@@ -586,46 +586,70 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     final SafeFuture<Optional<AttestationData>> result =
         forkChoiceTrigger
             .prepareForAttestationProduction(slot)
-            .thenApply(__ -> getAttestationHeadNode(slot))
             .thenCompose(
-                selectedHead ->
-                    getAttestationHeadBlockAndState(slot, selectedHead)
-                        .thenCompose(
-                            maybeBlockAndState -> {
-                              if (maybeBlockAndState.isEmpty()) {
-                                return SafeFuture.completedFuture(Optional.empty());
-                              }
-                              final SignedBlockAndState blockAndState = maybeBlockAndState.get();
-                              // The head block must not be optimistically synced.
-                              if (selectedHead
-                                  .map(ProtoNodeData::isOptimistic)
-                                  .orElseGet(
-                                      () ->
-                                          combinedChainDataClient.isOptimisticBlock(
-                                              blockAndState.getRoot()))) {
-                                return NodeSyncingException.failedFuture();
-                              }
-                              return createAttestationData(
-                                  epoch,
-                                  minQuerySlot,
-                                  slot,
-                                  committeeIndex,
-                                  blockAndState,
-                                  selectedHead.map(ProtoNodeData::getForkChoiceNode));
-                            }));
+                __ ->
+                    spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)
+                        ? createAttestationDataForForkChoiceNode(
+                            epoch, minQuerySlot, slot, committeeIndex)
+                        : createAttestationDataForBlockInEffect(
+                            epoch, minQuerySlot, slot, committeeIndex));
     result.always(context::stopTimer);
     return result;
   }
 
-  private SafeFuture<Optional<SignedBlockAndState>> getAttestationHeadBlockAndState(
-      final UInt64 slot, final Optional<ProtoNodeData> selectedHead) {
-    if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
-      return combinedChainDataClient.getSignedBlockAndStateInEffectAtSlot(slot);
-    }
+  private SafeFuture<Optional<AttestationData>> createAttestationDataForBlockInEffect(
+      final UInt64 epoch, final UInt64 minQuerySlot, final UInt64 slot, final int committeeIndex) {
+    return combinedChainDataClient
+        .getSignedBlockAndStateInEffectAtSlot(slot)
+        .thenCompose(
+            maybeBlockAndState -> {
+              if (maybeBlockAndState.isEmpty()) {
+                return SafeFuture.completedFuture(Optional.empty());
+              }
+              final SignedBlockAndState blockAndState = maybeBlockAndState.get();
+              // The head block must not be optimistically synced.
+              if (combinedChainDataClient.isOptimisticBlock(blockAndState.getRoot())) {
+                return NodeSyncingException.failedFuture();
+              }
+              return createAttestationData(
+                  epoch, minQuerySlot, slot, committeeIndex, blockAndState, Optional.empty());
+            });
+  }
 
-    return selectedHead
-        .map(node -> combinedChainDataClient.getStore().retrieveBlockAndState(node.getRoot()))
-        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
+  private SafeFuture<Optional<AttestationData>> createAttestationDataForForkChoiceNode(
+      final UInt64 epoch, final UInt64 minQuerySlot, final UInt64 slot, final int committeeIndex) {
+    // The payload variant is only known to fork choice, so slots it no longer tracks produce no
+    // attestation data.
+    final Optional<ProtoNodeData> maybeNode =
+        combinedChainDataClient.getForkChoiceNodeInEffectAtSlot(slot);
+    if (maybeNode.isEmpty()) {
+      // The head node is also dropped when its payload is found INVALID, until the head is
+      // re-selected. Report syncing, as for an optimistic head, so validator clients can fail over.
+      return combinedChainDataClient.isChainHeadOptimistic()
+          ? NodeSyncingException.failedFuture()
+          : SafeFuture.completedFuture(Optional.empty());
+    }
+    final ProtoNodeData node = maybeNode.get();
+    // The head block must not be optimistically synced.
+    if (node.isOptimistic()) {
+      return NodeSyncingException.failedFuture();
+    }
+    return combinedChainDataClient
+        .getStore()
+        .retrieveBlockAndState(node.getRoot())
+        .thenCompose(
+            maybeBlockAndState ->
+                maybeBlockAndState
+                    .map(
+                        blockAndState ->
+                            createAttestationData(
+                                epoch,
+                                minQuerySlot,
+                                slot,
+                                committeeIndex,
+                                blockAndState,
+                                Optional.of(node.getForkChoiceNode())))
+                    .orElseGet(() -> SafeFuture.completedFuture(Optional.empty())));
   }
 
   private SafeFuture<Optional<AttestationData>> createAttestationData(
@@ -656,15 +680,6 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     final AttestationData attestationData =
         createAttestationData(block, blockAndState.getState(), slot, computedCommitteeIndex);
     return SafeFuture.completedFuture(Optional.of(attestationData));
-  }
-
-  private Optional<ProtoNodeData> getAttestationHeadNode(final UInt64 slot) {
-    if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
-      return Optional.empty();
-    }
-    // Preserve the payload variant selected by the canonical chain. Slots before the fork choice
-    // anchor have no known variant, so no attestation data is produced.
-    return combinedChainDataClient.getForkChoiceNodeInEffectAtSlot(slot);
   }
 
   private AttestationData createAttestationData(

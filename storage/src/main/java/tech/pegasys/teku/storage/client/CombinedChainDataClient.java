@@ -218,29 +218,20 @@ public class CombinedChainDataClient {
   }
 
   /**
-   * Returns the fork choice node on the canonical chain that is in effect at {@code slot}: the
-   * chain head if it is at or before {@code slot}, otherwise the head chain's ancestor at that
-   * slot.
+   * Returns the fork choice node on the canonical chain that is in effect at {@code slot},
+   * including its Gloas payload variant (FULL or EMPTY) and optimistic status. See {@link
+   * RecentChainData#getForkChoiceNodeInEffectBySlot(UInt64)}.
    *
-   * <p>From Gloas the node carries the payload variant (FULL or EMPTY) that the canonical chain
-   * builds on, which a block root alone cannot express. The node data, including its optimistic
-   * status, is captured from a single fork choice snapshot.
+   * <p>Unlike {@link #getSignedBlockAndStateInEffectAtSlot(UInt64)}, this only covers slots tracked
+   * by fork choice and never falls back to finalized storage: the payload variant of a block is
+   * only known to fork choice. Callers that must serve historical slots need their own fallback.
    *
-   * @return the node in effect at {@code slot}, or empty if there is no chain head yet or {@code
-   *     slot} is before the fork choice anchor
+   * @return the node in effect at {@code slot}, or empty if there is no chain head yet, {@code
+   *     slot} is before the fork choice anchor, or the head node is no longer tracked by fork
+   *     choice (e.g. its payload was just found INVALID and the head has not been re-selected yet)
    */
   public Optional<ProtoNodeData> getForkChoiceNodeInEffectAtSlot(final UInt64 slot) {
-    return recentChainData
-        .getChainHead()
-        .flatMap(
-            head ->
-                recentChainData
-                    .getForkChoiceStrategy()
-                    // Resolves to the head node itself when the head is at or before the slot
-                    .flatMap(
-                        forkChoiceStrategy ->
-                            forkChoiceStrategy.getAncestorNodeData(
-                                head.getForkChoiceNode(), slot)));
+    return recentChainData.getForkChoiceNodeInEffectBySlot(slot);
   }
 
   /**

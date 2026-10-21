@@ -862,6 +862,20 @@ class ValidatorApiHandlerTest {
     }
 
     @TestTemplate
+    void shouldReportSyncingWhenForkChoiceNodeIsUnavailableAndHeadIsOptimistic() {
+      // e.g. the head's payload was just found INVALID and the head has not been re-selected yet
+      final UInt64 slot = epochStartSlot.increment();
+      when(chainDataClient.getCurrentSlot()).thenReturn(slot);
+      when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
+      when(chainDataClient.getForkChoiceNodeInEffectAtSlot(slot)).thenReturn(Optional.empty());
+      when(chainDataClient.isChainHeadOptimistic()).thenReturn(true);
+
+      assertThatSafeFuture(validatorApiHandler.createAttestationData(slot, 0))
+          .isCompletedExceptionallyWith(NodeSyncingException.class);
+      verify(store, never()).retrieveBlockAndState(any());
+    }
+
+    @TestTemplate
     void shouldRetainCapturedEmptyVariantWhileLoadingState() {
       final UInt64 slot = epochStartSlot.increment();
       final SignedBlockAndState blockAndState =
@@ -927,6 +941,22 @@ class ValidatorApiHandlerTest {
 
       assertThat(data.getBeaconBlockRoot()).isEqualTo(blockAndState.getRoot());
       verify(chainDataClient).getSignedBlockAndStateInEffectAtSlot(slot);
+      verify(chainDataClient, never()).getForkChoiceNodeInEffectAtSlot(any());
+    }
+
+    @TestTemplate
+    void shouldRejectOptimisticBlockInEffectAtSlot() {
+      final UInt64 slot = epochStartSlot.increment();
+      final SignedBlockAndState blockAndState =
+          dataStructureUtil.randomSignedBlockAndState(epochStartSlot);
+      when(chainDataClient.getCurrentSlot()).thenReturn(slot);
+      when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
+      when(chainDataClient.getSignedBlockAndStateInEffectAtSlot(slot))
+          .thenReturn(completedFuture(Optional.of(blockAndState)));
+      when(chainDataClient.isOptimisticBlock(blockAndState.getRoot())).thenReturn(true);
+
+      assertThatSafeFuture(validatorApiHandler.createAttestationData(slot, 0))
+          .isCompletedExceptionallyWith(NodeSyncingException.class);
       verify(chainDataClient, never()).getForkChoiceNodeInEffectAtSlot(any());
     }
   }
