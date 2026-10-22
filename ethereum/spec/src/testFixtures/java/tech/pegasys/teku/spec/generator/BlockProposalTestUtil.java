@@ -566,9 +566,13 @@ public class BlockProposalTestUtil {
             .orElseGet(
                 () -> {
                   final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
-                  return buildOnEmptyParent
+                  final Bytes32 parentBidBlockHash =
+                      stateGloas.getLatestExecutionPayloadBid().getBlockHash();
+                  // A zero bid block hash commits to no payload (the Gloas genesis bid), so the
+                  // parent can only be built on as EMPTY
+                  return buildOnEmptyParent || parentBidBlockHash.isZero()
                       ? stateGloas.getLatestBlockHash()
-                      : stateGloas.getLatestExecutionPayloadBid().getBlockHash();
+                      : parentBidBlockHash;
                 });
 
     if (!currentExecutionPayloadBlockHash.isZero() && terminalBlock.isPresent()) {

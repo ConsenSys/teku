@@ -162,4 +162,24 @@ public class MiscHelpersGloasTest {
 
     assertThat(miscHelpers.isBidBuildingOnFullParent(state, childBid)).isEqualTo(matches);
   }
+
+  @Test
+  public void isParentBlockFull_shouldCompareLatestBidBlockHashWithLatestBlockHash() {
+    final BeaconStateGloas state = BeaconStateGloas.required(data.randomBeaconState());
+    final Bytes32 bidBlockHash = state.getLatestExecutionPayloadBid().getBlockHash();
+    final BeaconStateGloas fullState =
+        BeaconStateGloas.required(
+            state.updated(
+                mutable ->
+                    MutableBeaconStateGloas.required(mutable).setLatestBlockHash(bidBlockHash)));
+    final BeaconStateGloas emptyState =
+        BeaconStateGloas.required(
+            state.updated(
+                mutable ->
+                    MutableBeaconStateGloas.required(mutable)
+                        .setLatestBlockHash(data.randomBytes32())));
+
+    assertThat(MiscHelpersGloas.isParentBlockFull(fullState)).isTrue();
+    assertThat(MiscHelpersGloas.isParentBlockFull(emptyState)).isFalse();
+  }
 }
