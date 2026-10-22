@@ -57,6 +57,13 @@ public class GetStateBuilderPendingPaymentsTest
   }
 
   @Override
+  protected BeaconState withField(
+      final BeaconState state, final SszVector<BuilderPendingPayment> field) {
+    return BeaconStateGloas.required(state)
+        .updatedGloas(mutable -> mutable.setBuilderPendingPayments(field));
+  }
+
+  @Override
   protected SszVector<BuilderPendingPayment> createField() {
     final SszVectorSchema<BuilderPendingPayment, ?> schema =
         SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())

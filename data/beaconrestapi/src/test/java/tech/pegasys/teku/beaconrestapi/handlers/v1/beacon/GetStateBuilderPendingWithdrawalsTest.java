@@ -55,6 +55,13 @@ public class GetStateBuilderPendingWithdrawalsTest
   }
 
   @Override
+  protected BeaconState withField(
+      final BeaconState state, final SszList<BuilderPendingWithdrawal> field) {
+    return BeaconStateGloas.required(state)
+        .updatedGloas(mutable -> mutable.setBuilderPendingWithdrawals(field));
+  }
+
+  @Override
   protected SszList<BuilderPendingWithdrawal> createField() {
     return SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())
         .getBuilderPendingWithdrawalsSchema()

@@ -37,14 +37,16 @@ import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
 import tech.pegasys.teku.infrastructure.json.JsonTestUtil;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
-import tech.pegasys.teku.infrastructure.ssz.SszData;
+import tech.pegasys.teku.infrastructure.ssz.SszCollection;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 
-public abstract class AbstractGetStateFieldTest<T extends SszData>
+public abstract class AbstractGetStateFieldTest<T extends SszCollection<?>>
     extends AbstractMigratedBeaconHandlerWithChainDataProviderTest {
+
+  private T seededField;
 
   protected abstract SpecMilestone getMinimumMilestone();
 
@@ -55,23 +57,30 @@ public abstract class AbstractGetStateFieldTest<T extends SszData>
 
   protected abstract T getField(BeaconState state);
 
+  protected abstract BeaconState withField(BeaconState state, T field);
+
   /** Creates a non-default value of the field for the current {@code spec}. */
   protected abstract T createField();
 
   @BeforeEach
-  void setUpAtGenesis() {
-    setUpAtGenesis(getMinimumMilestone());
+  void setUpAtGenesisWithSeededField() {
+    initialise(getMinimumMilestone());
+    seededField = createField();
+    genesis(state -> withField(state, seededField));
+    setUpHandler();
   }
 
-  private void setUpAtGenesis(final SpecMilestone milestone) {
-    initialise(milestone);
-    genesis();
+  private void setUpHandler() {
     setHandler(createHandler(chainDataProvider, schemaDefinitionCache));
     request.setPathParameter("state_id", "head");
   }
 
   @Test
   void shouldReturnFieldFromHeadState() throws JsonProcessingException {
+    assertThat(seededField).isNotEqualTo(seededField.getSchema().getDefault());
+    assertThat(getField(safeJoin(recentChainData.getBestState().orElseThrow())))
+        .isEqualTo(seededField);
+
     handler.handleRequest(request);
 
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
@@ -79,13 +88,14 @@ public abstract class AbstractGetStateFieldTest<T extends SszData>
         .isEqualTo(getMinimumMilestone().lowerCaseName());
     final ObjectAndMetaData<?> response = (ObjectAndMetaData<?>) request.getResponseBody();
     assertThat(response.getMilestone()).isEqualTo(getMinimumMilestone());
-    assertThat(response.getData())
-        .isEqualTo(getField(safeJoin(recentChainData.getBestState().orElseThrow())));
+    assertThat(response.getData()).isEqualTo(seededField);
   }
 
   @Test
   void shouldRejectStateBeforeMinimumMilestone() throws JsonProcessingException {
-    setUpAtGenesis(getMinimumMilestone().getPreviousMilestone());
+    initialise(getMinimumMilestone().getPreviousMilestone());
+    genesis();
+    setUpHandler();
 
     handler.handleRequest(request);
 

@@ -54,6 +54,12 @@ public class GetStatePendingDepositsTest
   }
 
   @Override
+  protected BeaconState withField(final BeaconState state, final SszList<PendingDeposit> field) {
+    return BeaconStateElectra.required(state)
+        .updatedElectra(mutable -> mutable.setPendingDeposits(field));
+  }
+
+  @Override
   protected SszList<PendingDeposit> createField() {
     return SchemaDefinitionsElectra.required(spec.getGenesisSchemaDefinitions())
         .getPendingDepositsSchema()

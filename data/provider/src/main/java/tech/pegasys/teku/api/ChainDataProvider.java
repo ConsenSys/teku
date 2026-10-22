@@ -1048,6 +1048,7 @@ public class ChainDataProvider {
                 getStateField(maybeStateAndMetadata, minimumMilestone, fieldLabel, fieldExtractor));
   }
 
+  @VisibleForTesting
   <T> Optional<ObjectAndMetaData<T>> getStateField(
       final Optional<StateAndMetaData> maybeStateAndMetadata,
       final SpecMilestone minimumMilestone,

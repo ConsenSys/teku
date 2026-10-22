@@ -28,6 +28,7 @@ import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class GetStateProposerLookaheadTest extends AbstractGetStateFieldTest<SszUInt64Vector> {
 
@@ -53,15 +54,22 @@ public class GetStateProposerLookaheadTest extends AbstractGetStateFieldTest<Ssz
   }
 
   @Override
+  protected BeaconState withField(final BeaconState state, final SszUInt64Vector field) {
+    return BeaconStateFulu.required(state)
+        .updatedFulu(mutable -> mutable.setProposerLookahead(field));
+  }
+
+  @Override
   protected SszUInt64Vector createField() {
     return getField(dataStructureUtil.randomBeaconState(32));
   }
 
   @Test
   void metadata_shouldHandle200MatchingFixture() throws IOException {
+    // The fixture holds the lookahead of the first random state a fresh DataStructureUtil makes
     final ObjectAndMetaData<SszUInt64Vector> responseData =
         new ObjectAndMetaData<>(
-            getField(dataStructureUtil.randomBeaconState(32)),
+            getField(new DataStructureUtil(spec).randomBeaconState(32)),
             SpecMilestone.FULU,
             false,
             true,

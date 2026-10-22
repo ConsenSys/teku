@@ -54,6 +54,13 @@ public class GetStatePendingConsolidationsTest
   }
 
   @Override
+  protected BeaconState withField(
+      final BeaconState state, final SszList<PendingConsolidation> field) {
+    return BeaconStateElectra.required(state)
+        .updatedElectra(mutable -> mutable.setPendingConsolidations(field));
+  }
+
+  @Override
   protected SszList<PendingConsolidation> createField() {
     return SchemaDefinitionsElectra.required(spec.getGenesisSchemaDefinitions())
         .getPendingConsolidationsSchema()

@@ -34,17 +34,21 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata.EndpointMetaDataBuilder;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
-import tech.pegasys.teku.infrastructure.ssz.SszData;
-import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
+import tech.pegasys.teku.infrastructure.ssz.SszCollection;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszCollectionSchema;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 /**
- * Serves a single field of the beacon state, as JSON or SSZ, for states at or after the milestone
- * that introduced the field. Requests for older states fail with 400.
+ * Serves a single collection field of the beacon state, as JSON or SSZ, for states at or after the
+ * milestone that introduced the field. Requests for older states fail with 400.
+ *
+ * <p>Fields are limited to SSZ collections because the response uses the field schema's JSON type
+ * for any instance of {@code T}, which only holds when that type does not depend on the concrete
+ * class (see {@link #getResponseType}).
  */
-public abstract class AbstractGetStateField<T extends SszData> extends RestApiEndpoint {
+public abstract class AbstractGetStateField<T extends SszCollection<?>> extends RestApiEndpoint {
 
   private final ChainDataProvider chainDataProvider;
   private final SpecMilestone minimumMilestone;
@@ -57,7 +61,7 @@ public abstract class AbstractGetStateField<T extends SszData> extends RestApiEn
       final String responseTypeName,
       final SpecMilestone minimumMilestone,
       final String fieldLabel,
-      final SszSchema<? extends T> fieldSchema,
+      final SszCollectionSchema<?, ? extends T> fieldSchema,
       final Function<BeaconState, T> fieldExtractor) {
     super(
         endpointMetadata
@@ -102,12 +106,13 @@ public abstract class AbstractGetStateField<T extends SszData> extends RestApiEn
                     .orElseGet(AsyncApiResponse::respondNotFound)));
   }
 
-  // The schema's JSON type serializes any instance of the field type, not just the schema's own
-  // concrete collection type.
+  // Collection JSON types only use the collection interface: list and vector types iterate the
+  // elements, byte and bit collections write the SSZ bytes. So the schema's JSON type can serialize
+  // any instance of T, not just the schema's own concrete collection class.
   @SuppressWarnings("unchecked")
-  private static <T extends SszData>
+  private static <T extends SszCollection<?>>
       SerializableTypeDefinition<ObjectAndMetaData<T>> getResponseType(
-          final String responseTypeName, final SszSchema<? extends T> fieldSchema) {
+          final String responseTypeName, final SszCollectionSchema<?, ? extends T> fieldSchema) {
     final SerializableTypeDefinition<T> fieldType =
         (SerializableTypeDefinition<T>) fieldSchema.getJsonTypeDefinition();
     return SerializableTypeDefinition.<ObjectAndMetaData<T>>object()

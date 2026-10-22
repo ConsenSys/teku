@@ -54,6 +54,13 @@ public class GetStatePendingPartialWithdrawalsTest
   }
 
   @Override
+  protected BeaconState withField(
+      final BeaconState state, final SszList<PendingPartialWithdrawal> field) {
+    return BeaconStateElectra.required(state)
+        .updatedElectra(mutable -> mutable.setPendingPartialWithdrawals(field));
+  }
+
+  @Override
   protected SszList<PendingPartialWithdrawal> createField() {
     return SchemaDefinitionsElectra.required(spec.getGenesisSchemaDefinitions())
         .getPendingPartialWithdrawalsSchema()
