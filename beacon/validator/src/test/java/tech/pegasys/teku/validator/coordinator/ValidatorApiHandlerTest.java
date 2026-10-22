@@ -762,8 +762,6 @@ class ValidatorApiHandlerTest {
 
     when(chainDataClient.getForkChoiceNodeInEffectAtSlot(slot))
         .thenReturn(Optional.of(forkChoiceNodeData(blockAndState, PAYLOAD_STATUS_EMPTY, true)));
-    when(store.retrieveBlockAndState(blockAndState.getRoot()))
-        .thenReturn(completedFuture(Optional.of(blockAndState)));
     when(forkChoiceTrigger.prepareForAttestationProduction(slot)).thenReturn(SafeFuture.COMPLETE);
 
     final int committeeIndex = 0;
@@ -772,6 +770,8 @@ class ValidatorApiHandlerTest {
 
     assertThat(result).isCompletedExceptionally();
     assertThatThrownBy(result::get).hasRootCauseInstanceOf(NodeSyncingException.class);
+    // An optimistic node is rejected before its block and state are loaded
+    verify(store, never()).retrieveBlockAndState(any());
   }
 
   @Test
@@ -840,12 +840,11 @@ class ValidatorApiHandlerTest {
       when(chainDataClient.getForkChoiceNodeInEffectAtSlot(slot))
           .thenReturn(Optional.of(forkChoiceNodeData(blockAndState, PAYLOAD_STATUS_FULL, true)));
       when(chainDataClient.isOptimisticBlock(blockAndState.getRoot())).thenReturn(false);
-      when(store.retrieveBlockAndState(blockAndState.getRoot()))
-          .thenReturn(completedFuture(Optional.of(blockAndState)));
 
       assertThatSafeFuture(validatorApiHandler.createAttestationData(slot, 0))
           .isCompletedExceptionallyWith(NodeSyncingException.class);
       verify(chainDataClient, never()).isOptimisticBlock(blockAndState.getRoot());
+      verify(store, never()).retrieveBlockAndState(any());
     }
 
     @TestTemplate
