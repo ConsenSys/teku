@@ -9,6 +9,7 @@
 ### Breaking Changes
 
 ### Additions and Improvements
+ - Removed the Gloas fork schedule for the HOODI network (previously epoch 132352, 26 Oct 2026); Gloas is unscheduled on HOODI again.
  - Lowered the CPU used by the gossip event thread to recognise duplicate gossip messages, which grows with the number of connected peers. [#11549](https://github.com/Consensys-Incorporated/teku/pull/11549)
  - Updated discovery library to 26.10.1, which speeds up secp256k1 operations used by node discovery. [#11541](https://github.com/Consensys-Incorporated/teku/pull/11541)
  - Gossip signature verification now gathers larger batches and verifies signatures over the same message together, lowering CPU usage at the cost of up to ~10 ms added gossip validation latency. Use `--Xp2p-batch-verify-signatures-mode=LEGACY` to restore the previous batching behaviour. In both modes, signatures re-verified after a failed batch now honour `--Xp2p-batch-verify-signatures-strict-thread-limit-enabled` and a task that throws no longer fails the rest of its batch.
