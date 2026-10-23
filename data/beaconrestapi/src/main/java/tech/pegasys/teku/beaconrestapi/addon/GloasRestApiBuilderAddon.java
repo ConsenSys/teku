@@ -17,6 +17,8 @@ import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.beaconrestapi.RestApiBuilderAddon;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetPayloadAttestations;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetSignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateBuilderPendingPayments;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateBuilderPendingWithdrawals;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.PostExecutionPayloadEnvelope;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.PostPayloadAttestations;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.PostPublishExecutionPayloadBid;
@@ -52,6 +54,8 @@ public class GloasRestApiBuilderAddon implements RestApiBuilderAddon {
   @Override
   public RestApiBuilder apply(final RestApiBuilder builder) {
     return builder
+        .endpoint(new GetStateBuilderPendingWithdrawals(dataProvider, schemaCache))
+        .endpoint(new GetStateBuilderPendingPayments(dataProvider, schemaCache))
         .endpoint(new GetSignedExecutionPayloadEnvelope(dataProvider, schemaCache))
         .endpoint(new GetPayloadAttestations(dataProvider, schemaCache))
         .endpoint(
