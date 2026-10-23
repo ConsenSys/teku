@@ -51,4 +51,9 @@ public record LoggingResponseCallback<T>(
     logger.onError(error);
     callback.completeWithUnexpectedError(error);
   }
+
+  @Override
+  public boolean isClosed() {
+    return callback.isClosed();
+  }
 }

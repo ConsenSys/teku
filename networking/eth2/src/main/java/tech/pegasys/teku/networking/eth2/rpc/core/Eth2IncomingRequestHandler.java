@@ -47,6 +47,7 @@ public class Eth2IncomingRequestHandler<
   private final String protocolId;
   private final AsyncRunner asyncRunner;
   private final AtomicBoolean requestHandled = new AtomicBoolean(false);
+  private final AtomicBoolean streamClosed = new AtomicBoolean(false);
 
   public Eth2IncomingRequestHandler(
       final String protocolId,
@@ -96,6 +97,7 @@ public class Eth2IncomingRequestHandler<
 
   @Override
   public void closed(final NodeId nodeId, final RpcStream rpcStream) {
+    streamClosed.set(true);
     requestDecoder.close();
   }
 
@@ -148,6 +150,7 @@ public class Eth2IncomingRequestHandler<
   }
 
   private RpcResponseCallback<TResponse> createResponseCallback(final RpcStream rpcStream) {
-    return new RpcResponseCallback<>(rpcStream, responseEncoder, asyncRunner, protocolId);
+    return new RpcResponseCallback<>(
+        rpcStream, responseEncoder, asyncRunner, protocolId, streamClosed::get);
   }
 }

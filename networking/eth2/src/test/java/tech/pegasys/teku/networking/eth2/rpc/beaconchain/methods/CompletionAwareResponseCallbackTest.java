@@ -41,6 +41,15 @@ public class CompletionAwareResponseCallbackTest {
   }
 
   @Test
+  void isClosedDelegates() {
+    assertThat(callback.isClosed()).isFalse();
+
+    when(delegate.isClosed()).thenReturn(true);
+
+    assertThat(callback.isClosed()).isTrue();
+  }
+
+  @Test
   void completionActionRunsOnCompleteSuccessfully() {
     final AtomicInteger counter = new AtomicInteger(0);
     callback.onCompletion(counter::incrementAndGet);

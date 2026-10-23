@@ -78,6 +78,11 @@ public class CompletionAwareResponseCallback<T> implements ResponseCallback<T> {
     }
   }
 
+  @Override
+  public boolean isClosed() {
+    return delegate.isClosed();
+  }
+
   private void runCompletionActions() {
     if (!completionActionsRan.compareAndSet(false, true)) {
       return;

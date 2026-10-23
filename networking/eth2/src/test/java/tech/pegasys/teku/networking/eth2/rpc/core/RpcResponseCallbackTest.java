@@ -23,6 +23,7 @@ import static org.mockito.Mockito.when;
 import io.netty.channel.socket.ChannelOutputShutdownException;
 import java.nio.channels.ClosedChannelException;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
@@ -45,8 +46,20 @@ class RpcResponseCallbackTest {
 
   private final SszData data = mock(SszData.class);
 
+  private final AtomicBoolean streamClosed = new AtomicBoolean(false);
+
   private final RpcResponseCallback<SszData> callback =
-      new RpcResponseCallback<>(rpcStream, responseEncoder, asyncRunner, PROTOCOL_ID);
+      new RpcResponseCallback<>(
+          rpcStream, responseEncoder, asyncRunner, PROTOCOL_ID, streamClosed::get);
+
+  @Test
+  void isClosedShouldReflectStreamClosure() {
+    assertThat(callback.isClosed()).isFalse();
+
+    streamClosed.set(true);
+
+    assertThat(callback.isClosed()).isTrue();
+  }
 
   @Test
   void shouldCloseStreamWhenResponseWriteDoesNotComplete() {

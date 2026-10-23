@@ -25,4 +25,7 @@ public interface ResponseCallback<T> {
   void completeWithErrorResponse(RpcException error);
 
   void completeWithUnexpectedError(Throwable error);
+
+  /** Whether the response stream has been closed, so handlers can stop doing work. */
+  boolean isClosed();
 }
