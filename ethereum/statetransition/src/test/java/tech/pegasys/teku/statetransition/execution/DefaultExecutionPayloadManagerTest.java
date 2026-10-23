@@ -398,6 +398,45 @@ class DefaultExecutionPayloadManagerTest {
   }
 
   @Test
+  public void shouldRecordExecutionPayloadImportedBeforeDeadlineAsSeen() {
+    // a payload which did not arrive over gossip, for example one fetched by root, was still seen
+    final UInt64 beforeDeadline = payloadDueDeadlineMillis(signedExecutionPayload).minus(1);
+    when(store.getTimeInMillis()).thenReturn(beforeDeadline);
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+        .thenReturn(
+            completedFuture(ExecutionPayloadImportResult.successful(signedExecutionPayload)));
+
+    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    asyncRunner.executeDueActions();
+
+    assertThat(resultFuture).isCompleted();
+    assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
+  }
+
+  @Test
+  public void shouldNotRecordExecutionPayloadImportedAfterDeadlineAsSeen() {
+    final UInt64 afterDeadline = payloadDueDeadlineMillis(signedExecutionPayload).plus(1);
+    when(store.getTimeInMillis()).thenReturn(afterDeadline);
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+        .thenReturn(
+            completedFuture(ExecutionPayloadImportResult.successful(signedExecutionPayload)));
+
+    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    asyncRunner.executeDueActions();
+
+    assertThat(resultFuture).isCompleted();
+    assertExecutionPayloadNotSeenBeforeDeadline(signedExecutionPayload);
+  }
+
+  @Test
   public void shouldNotCacheInvalidExecutionPayloadWhenCommitmentNotVerified() {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));

@@ -136,7 +136,7 @@ public class DefaultExecutionPayloadManager
                   signedExecutionPayload);
               recordIfExecutionPayloadIsSeenBeforeDeadline(
                   signedExecutionPayload, arrivalTimestamp);
-              importExecutionPayload(signedExecutionPayload, true).finishError(LOG);
+              importValidatedExecutionPayload(signedExecutionPayload).finishError(LOG);
             }
             case SAVE_FOR_FUTURE ->
                 saveForFuture(signedExecutionPayload, arrivalTimestamp, broadcastValidationLevel);
@@ -162,7 +162,7 @@ public class DefaultExecutionPayloadManager
                   recordIfExecutionPayloadIsSeenBeforeDeadline(
                       signedExecutionPayload, arrivalTimestamp);
                   return new ValidateAndImportResult(
-                      result, Optional.of(importExecutionPayload(signedExecutionPayload, true)));
+                      result, Optional.of(importValidatedExecutionPayload(signedExecutionPayload)));
                 }
                 case SAVE_FOR_FUTURE ->
                     saveForFuture(
@@ -203,6 +203,23 @@ public class DefaultExecutionPayloadManager
 
   @Override
   public SafeFuture<ExecutionPayloadImportResult> importExecutionPayload(
+      final SignedExecutionPayloadEnvelope signedExecutionPayload,
+      final boolean payloadCommitmentVerified) {
+    // A payload which did not arrive over gossip was still seen, and the payload timeliness
+    // attestation only asks whether it was seen before the deadline. Recorded before the import
+    // begins, because the import is what reports the payload as available.
+    recordIfExecutionPayloadIsSeenBeforeDeadline(
+        signedExecutionPayload, recentChainData.getStore().getTimeInMillis());
+    return importValidatedExecutionPayload(signedExecutionPayload, payloadCommitmentVerified);
+  }
+
+  /** Imports a payload which was already recorded as seen when it was validated. */
+  private SafeFuture<ExecutionPayloadImportResult> importValidatedExecutionPayload(
+      final SignedExecutionPayloadEnvelope signedExecutionPayload) {
+    return importValidatedExecutionPayload(signedExecutionPayload, true);
+  }
+
+  private SafeFuture<ExecutionPayloadImportResult> importValidatedExecutionPayload(
       final SignedExecutionPayloadEnvelope signedExecutionPayload,
       final boolean payloadCommitmentVerified) {
     return asyncRunner
